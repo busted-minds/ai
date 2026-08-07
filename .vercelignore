@@ -1,0 +1,7 @@
+.env
+.env.local
+/images
+/tests
+/tmp
+/coverage
+/supabase
