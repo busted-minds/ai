@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$BmaiSiteUrl = "http://localhost:3000",
+  [string]$BmaiSiteUrl = "https://ai.bustedminds.us.kg",
   [switch]$Apply
 )
 
