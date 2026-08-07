@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { synchronizeAccountProfile } from "@/lib/auth/viewer";
-import { requestOrigin, safeNextPath } from "@/lib/security";
+import { AUTH_NEXT_COOKIE, requestOrigin, safeNextPath } from "@/lib/security";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const nextPath = safeNextPath(url.searchParams.get("next"));
+  const cookieStore = await cookies();
+  const nextPath = safeNextPath(
+    cookieStore.get(AUTH_NEXT_COOKIE)?.value ?? url.searchParams.get("next"),
+  );
+  cookieStore.delete(AUTH_NEXT_COOKIE);
   if (!code) return NextResponse.redirect(`${requestOrigin(request)}/auth/error?reason=missing-code`);
 
   const supabase = await createSupabaseServerClient();
@@ -23,4 +28,3 @@ export async function GET(request: Request) {
   }
   return NextResponse.redirect(`${requestOrigin(request)}${nextPath}`);
 }
-
