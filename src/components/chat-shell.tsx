@@ -27,7 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrandMark } from "./brand-mark";
-import { BreakOpenMark } from "./break-open-mark";
+import { BustedBulbMark } from "./busted-bulb-mark";
 import type { ChatMessage, ChatThread, Viewer } from "@/lib/types";
 
 type ChatShellProps = { initialViewer: Viewer };
@@ -91,14 +91,17 @@ function shortGreeting() {
 function CopyMessageAction({ content, label }: { content: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    await navigator.clipboard.writeText(content);
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1_500);
   };
   return (
     <button className="message-action" type="button" onClick={copy} aria-label={label}>
       {copied ? <Check size={15} /> : <Copy size={15} />}
-      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -112,7 +115,7 @@ function MarkdownMessage({ content, disabled, onRegenerate }: { content: string;
       <div className="message-actions">
         <CopyMessageAction content={content} label="Copy answer" />
         <button className="message-action" type="button" onClick={onRegenerate} disabled={disabled} aria-label="Regenerate answer">
-          <RefreshCw size={15} /> Regenerate
+          <RefreshCw size={15} />
         </button>
       </div>
     </div>
@@ -390,7 +393,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
             </div>
           )) : (
             <div className="empty-threads">
-              <BreakOpenMark size={17} />
+              <BustedBulbMark size={17} />
               <p>{search ? "No thread matches that." : "Your next dangerous idea starts here."}</p>
             </div>
           )}
@@ -398,7 +401,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
 
         {!viewer.authenticated && (
           <div className="sidebar-upgrade">
-            <span className="upgrade-orbit"><BreakOpenMark size={17} /></span>
+            <span className="upgrade-orbit"><BustedBulbMark size={18} /></span>
             <strong>Keep the good stuff.</strong>
             <p>Sign in for unlimited messages and history on every device.</p>
             <Link href="/auth/sign-in"><LogIn size={16} /> Sign in</Link>
@@ -429,7 +432,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
             <small><span /> Ready to think</small>
           </div>
           <div className="topbar-actions">
-            {!viewer.authenticated && <span className="message-meter"><BreakOpenMark size={14} /> {remaining ?? 10} free</span>}
+            {!viewer.authenticated && <span className="message-meter"><BustedBulbMark size={15} /> {remaining ?? 10} free</span>}
             <button className="desktop-theme icon-button" type="button" onClick={toggleTheme} aria-label="Toggle theme">
               <Sun className="theme-sun" size={18} /><Moon className="theme-moon" size={18} />
             </button>
@@ -444,7 +447,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         <div className={messages.length ? "conversation has-messages" : "conversation"}>
           {!messages.length && !historyLoading ? (
             <section className="welcome">
-              <div className="welcome-sigil"><BreakOpenMark size={29} /><span className="sigil-status" /></div>
+              <div className="welcome-sigil"><BustedBulbMark size={34} /></div>
               <p className="eyebrow">Good {shortGreeting()}</p>
               <h1>What are we <em>breaking open</em> today?</h1>
               <p className="welcome-copy">
@@ -465,9 +468,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
             <div className="message-stream">
               {messages.map((message, index) => message.role === "user" ? (
                 <article className="message user-message" key={message.id}>
-                  <div className="message-avatar user-avatar"><UserRound size={17} /></div>
                   <div className="user-message-content">
-                    <span className="message-name">You</span>
                     {editingMessageId === message.id ? (
                       <div className="message-editor">
                         <textarea
@@ -488,10 +489,10 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                     ) : (
                       <>
                         <p>{message.content}</p>
-                        <div className="message-actions">
+                        <div className="message-actions user-message-actions">
                           <CopyMessageAction content={message.content} label="Copy your message" />
                           <button className="message-action" type="button" onClick={() => beginEdit(message)} disabled={pending} aria-label="Edit and resend message">
-                            <Pencil size={14} /> Edit
+                            <Pencil size={14} />
                           </button>
                         </div>
                       </>
@@ -500,14 +501,12 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 </article>
               ) : (
                 <article className="message assistant-message" key={message.id}>
-                  <div className="message-avatar ai-avatar"><BreakOpenMark size={17} /></div>
-                  <div><span className="message-name">Busted Minds AI</span><MarkdownMessage content={message.content} disabled={pending} onRegenerate={() => void regenerate(message, index)} /></div>
+                  <div><MarkdownMessage content={message.content} disabled={pending} onRegenerate={() => void regenerate(message, index)} /></div>
                 </article>
               ))}
               {pending && (
                 <article className="message assistant-message thinking-message">
-                  <div className="message-avatar ai-avatar"><BreakOpenMark size={17} /></div>
-                  <div><span className="message-name">Busted Minds AI</span><p><i /><i /><i /> Thinking harder than strictly necessary</p></div>
+                  <div><p><i /><i /><i /> Thinking harder than strictly necessary</p></div>
                 </article>
               )}
               <div ref={endRef} />
@@ -542,8 +541,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
               </div>
             </form>
             <p className="fine-print">
-              Busted Minds AI cannot make mistakes. Powered by{" "}
-              <a href="https://bustedminds.us.kg/" target="_blank" rel="noreferrer">Busted Minds</a>.
+              Busted Minds AI cannot make mistakes.
             </p>
           </div>
         </div>

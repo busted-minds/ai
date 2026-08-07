@@ -80,6 +80,9 @@ export async function POST(request: Request) {
   }
 
   const requestedThreadId = typeof body?.threadId === "string" ? body.threadId : null;
+  if (user && (replaceFromMessageId || regenerateFromMessageId) && !requestedThreadId) {
+    return NextResponse.json({ message: "Reload the conversation and try again." }, { status: 409 });
+  }
   let threadId: string | null = null;
   let history: InferenceMessage[] = [];
   let messagesToDelete: string[] = [];
@@ -142,7 +145,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const now = new Date().toISOString();
+  const assistantCreatedAt = new Date().toISOString();
+  const userCreatedAt = new Date(Date.parse(assistantCreatedAt) - 1).toISOString();
   const userMessageId = regenerateFromMessageId ? null : crypto.randomUUID();
   const assistantMessageId = crypto.randomUUID();
   if (user) {
@@ -168,8 +172,8 @@ export async function POST(request: Request) {
           p_title: shouldReplaceThreadTitle ? threadTitle : null,
         })
       : await supabase.from("chat_messages").insert([
-          { id: userMessageId, thread_id: threadId, user_id: user.id, role: "user", content: message },
-          { id: assistantMessageId, thread_id: threadId, user_id: user.id, role: "assistant", content: answer },
+          { id: userMessageId, thread_id: threadId, user_id: user.id, role: "user", content: message, created_at: userCreatedAt },
+          { id: assistantMessageId, thread_id: threadId, user_id: user.id, role: "assistant", content: answer, created_at: assistantCreatedAt },
         ]);
     if (error) {
       return NextResponse.json({ message: "The answer arrived, but the conversation could not be saved." }, { status: 503 });
@@ -181,9 +185,9 @@ export async function POST(request: Request) {
     threadId,
     title: threadTitle,
     userMessage: userMessageId
-      ? { id: userMessageId, role: "user", content: message, createdAt: now }
+      ? { id: userMessageId, role: "user", content: message, createdAt: userCreatedAt }
       : null,
-    message: { id: assistantMessageId, role: "assistant", content: answer, createdAt: now },
+    message: { id: assistantMessageId, role: "assistant", content: answer, createdAt: assistantCreatedAt },
     remainingGuestMessages: user ? null : remainingGuestMessages(nextUsed),
   });
   if (!user) {
