@@ -56,10 +56,12 @@ button { color: inherit; }
 .sidebar::before { position: absolute; inset: 0; z-index: -1; content: ""; pointer-events: none; background: radial-gradient(circle at 20% -10%, rgba(56, 215, 242, 0.08), transparent 26%), radial-gradient(circle at 100% 70%, rgba(255, 84, 24, 0.045), transparent 30%); }
 .sidebar-head { display: flex; min-height: 54px; align-items: center; justify-content: space-between; padding: 0 8px 0 4px; }
 .brand-mark { display: inline-flex; min-width: 0; align-items: center; gap: 10px; }
-.brand-image { flex: 0 0 auto; width: 46px; height: 46px; object-fit: contain; filter: drop-shadow(0 7px 15px rgba(0, 0, 0, .2)); }
-.brand-image-light { display: none; }
-[data-theme="light"] .brand-image-dark { display: none; }
-[data-theme="light"] .brand-image-light { display: block; }
+.theme-logo { display: inline-block; flex: 0 0 auto; }
+.theme-logo > img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 7px 15px rgba(0, 0, 0, .2)); }
+.theme-logo > .theme-logo-image-light { display: none; }
+[data-theme="light"] .theme-logo-image-dark { display: none; }
+[data-theme="light"] .theme-logo-image-light { display: block; }
+.brand-image { width: 46px; height: 46px; }
 .brand-copy { display: grid; min-width: 0; line-height: 1; }
 .brand-copy strong { font-family: var(--font-display); font-size: 14px; letter-spacing: -.02em; }
 .brand-copy small { margin-top: 6px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
@@ -201,7 +203,7 @@ button { color: inherit; }
 
 .center-page { display: grid; min-height: 100dvh; place-items: center; padding: 28px; background: var(--page); background-image: radial-gradient(circle at 50% 0, rgba(56, 215, 242, .1), transparent 35%), linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: auto, 60px 60px, 60px 60px; }
 .auth-card { width: min(100%, 560px); padding: 42px; border: 1px solid var(--border-strong); border-radius: 24px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
-.auth-card > img { display: block; object-fit: contain; margin-bottom: 24px; }
+.auth-card > .auth-logo { width: 72px; height: 72px; margin-bottom: 24px; }
 .auth-card .eyebrow { margin-bottom: 12px; }
 .auth-card h1 { margin: 0; font-family: var(--font-display); font-size: clamp(34px, 7vw, 52px); letter-spacing: -.055em; }
 .auth-card > p { margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.75; }

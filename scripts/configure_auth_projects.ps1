@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$BmaiSiteUrl = "https://ai.bustedminds.us.kg",
+  [string]$CentralAccountUrl = "https://accounts.bustedminds.us.kg",
   [switch]$Apply
 )
 
@@ -70,6 +71,7 @@ $backupPath = Join-Path $backupDirectory ("auth-config-backup-{0}.json" -f (Get-
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $backupPath -Encoding utf8
 
 $normalizedBmaiSiteUrl = $BmaiSiteUrl.TrimEnd("/")
+$normalizedCentralAccountUrl = $CentralAccountUrl.TrimEnd("/")
 $redirects = @(
   "$normalizedBmaiSiteUrl/auth/callback",
   "http://localhost:3000/auth/callback"
@@ -79,8 +81,17 @@ if ($bmai.uri_allow_list) {
 }
 $redirectList = ($redirects | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique) -join ","
 
+$centralRedirects = @(
+  "$normalizedCentralAccountUrl/auth/callback"
+)
+if ($central.uri_allow_list) {
+  $centralRedirects += @([string]$central.uri_allow_list -split ",")
+}
+$centralRedirectList = ($centralRedirects | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique) -join ","
+
 Patch-AuthConfig $centralRef @{
-  site_url = "https://chess.bustedminds.us.kg"
+  site_url = $normalizedCentralAccountUrl
+  uri_allow_list = $centralRedirectList
   oauth_server_enabled = $true
   oauth_server_authorization_path = "/oauth/consent"
   oauth_server_allow_dynamic_registration = $false
@@ -94,7 +105,12 @@ Patch-AuthConfig $bmaiRef @{
 
 $centralVerified = Get-AuthConfig $centralRef
 $bmaiVerified = Get-AuthConfig $bmaiRef
-if (-not $centralVerified.oauth_server_enabled -or $centralVerified.oauth_server_authorization_path -ne "/oauth/consent") {
+if (
+  -not $centralVerified.oauth_server_enabled -or
+  $centralVerified.oauth_server_authorization_path -ne "/oauth/consent" -or
+  $centralVerified.site_url -ne $normalizedCentralAccountUrl -or
+  "$normalizedCentralAccountUrl/auth/callback" -notin (@([string]$centralVerified.uri_allow_list -split ",") | ForEach-Object { $_.Trim() })
+) {
   throw "Central OAuth server configuration did not persist."
 }
 $verifiedRedirects = @([string]$bmaiVerified.uri_allow_list -split ",") | ForEach-Object { $_.Trim() }

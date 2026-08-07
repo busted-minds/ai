@@ -7,25 +7,41 @@ type BrandMarkProps = {
   priority?: boolean;
 };
 
+type ThemeLogoProps = {
+  className?: string;
+  priority?: boolean;
+  size: number;
+};
+
+export function ThemeLogo({ className = "", priority = false, size }: ThemeLogoProps) {
+  const classes = ["theme-logo", className].filter(Boolean).join(" ");
+
+  return (
+    <span className={classes} role="img" aria-label="Busted Minds AI">
+      <Image
+        className="theme-logo-image theme-logo-image-dark"
+        src={darkLogo}
+        alt=""
+        width={size}
+        height={size}
+        priority={priority}
+      />
+      <Image
+        className="theme-logo-image theme-logo-image-light"
+        src={lightLogo}
+        alt=""
+        width={size}
+        height={size}
+        priority={priority}
+      />
+    </span>
+  );
+}
+
 export function BrandMark({ compact = false, priority = false }: BrandMarkProps) {
   return (
     <span className={compact ? "brand-mark brand-mark-compact" : "brand-mark"}>
-      <Image
-        className="brand-image brand-image-dark"
-        src={darkLogo}
-        alt="Busted Minds AI"
-        width={compact ? 42 : 52}
-        height={compact ? 42 : 52}
-        priority={priority}
-      />
-      <Image
-        className="brand-image brand-image-light"
-        src={lightLogo}
-        alt="Busted Minds AI"
-        width={compact ? 42 : 52}
-        height={compact ? 42 : 52}
-        priority={priority}
-      />
+      <ThemeLogo className="brand-image" size={compact ? 42 : 52} priority={priority} />
       {!compact && (
         <span className="brand-copy">
           <strong>Busted Minds</strong>

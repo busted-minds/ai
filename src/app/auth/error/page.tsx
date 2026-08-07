@@ -1,6 +1,6 @@
 import Link from "next/link";
-import Image from "next/image";
 import { ArrowLeft, RefreshCw, ShieldAlert } from "lucide-react";
+import { ThemeLogo } from "@/components/brand-mark";
 
 export const metadata = { title: "Sign-in trouble" };
 
@@ -8,7 +8,7 @@ export default function AuthErrorPage() {
   return (
     <main className="center-page">
       <section className="auth-card">
-        <Image src="/brand/bmai-logo-light.png" alt="Busted Minds AI" width={72} height={72} priority />
+        <ThemeLogo className="auth-logo" size={72} priority />
         <span className="eyebrow"><ShieldAlert size={14} /> Account connection</span>
         <h1>The handshake fumbled.</h1>
         <p>
@@ -22,4 +22,3 @@ export default function AuthErrorPage() {
     </main>
   );
 }
-

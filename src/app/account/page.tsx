@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, LogOut, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
+import { ThemeLogo } from "@/components/brand-mark";
 import { loadViewer } from "@/lib/auth/viewer";
 
 export const metadata = { title: "Your account" };
@@ -12,14 +12,13 @@ export default async function AccountPage() {
   return (
     <main className="center-page">
       <section className="auth-card account-card">
-        <Image src="/brand/bmai-logo-light.png" alt="Busted Minds AI" width={72} height={72} priority />
+        <ThemeLogo className="auth-logo" size={72} priority />
         <span className="eyebrow"><ShieldCheck size={14} /> Busted Minds Account</span>
         <h1>You’re synced.</h1>
         <p>Your threads live with your Busted Minds Account and follow you across devices.</p>
         <dl className="account-details">
           <div><dt>Email</dt><dd>{viewer.email ?? "Private account"}</dd></div>
           <div><dt>Conversation limit</dt><dd>Unlimited</dd></div>
-          <div><dt>Storage</dt><dd>Private &amp; protected by row-level security</dd></div>
         </dl>
         <div className="auth-actions">
           <Link className="ghost-button" href="/"><ArrowLeft size={17} /> Back to chat</Link>
@@ -31,4 +30,3 @@ export default async function AccountPage() {
     </main>
   );
 }
-
