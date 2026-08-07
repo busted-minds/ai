@@ -17,6 +17,13 @@ type ChatRequest = {
   threadId?: unknown;
   message?: unknown;
   history?: unknown;
+  replaceFromMessageId?: unknown;
+  regenerateFromMessageId?: unknown;
+};
+
+type StoredMessage = InferenceMessage & {
+  id: string;
+  created_at: string;
 };
 
 function sanitizeHistory(value: unknown): InferenceMessage[] {
@@ -44,7 +51,16 @@ export async function POST(request: Request) {
     }
   })();
   const message = typeof body?.message === "string" ? body.message.trim() : "";
-  if (!message || message.length > 12_000) {
+  const replaceFromMessageId = typeof body?.replaceFromMessageId === "string"
+    ? body.replaceFromMessageId
+    : null;
+  const regenerateFromMessageId = typeof body?.regenerateFromMessageId === "string"
+    ? body.regenerateFromMessageId
+    : null;
+  if (replaceFromMessageId && regenerateFromMessageId) {
+    return NextResponse.json({ message: "Choose either edit or regenerate." }, { status: 400 });
+  }
+  if ((!message && !regenerateFromMessageId) || message.length > 12_000) {
     return NextResponse.json(
       { message: message ? "Messages must be under 12,000 characters." : "Write something first." },
       { status: 400 },
@@ -66,29 +82,59 @@ export async function POST(request: Request) {
   const requestedThreadId = typeof body?.threadId === "string" ? body.threadId : null;
   let threadId: string | null = null;
   let history: InferenceMessage[] = [];
+  let messagesToDelete: string[] = [];
+  let threadTitle = message ? makeThreadTitle(message) : "Untitled thought";
+  let shouldReplaceThreadTitle = false;
   if (user && requestedThreadId) {
     const { data: thread } = await supabase
       .from("chat_threads")
-      .select("id")
+      .select("id,title")
       .eq("id", requestedThreadId)
       .maybeSingle();
     if (!thread) return NextResponse.json({ message: "Conversation not found." }, { status: 404 });
     threadId = thread.id;
+    threadTitle = thread.title;
     const { data: rows, error } = await supabase
       .from("chat_messages")
-      .select("role,content")
+      .select("id,role,content,created_at")
       .eq("thread_id", threadId)
-      .order("created_at", { ascending: false })
-      .limit(23);
+      .order("created_at", { ascending: true })
+      .limit(200);
     if (error) return NextResponse.json({ message: "Conversation history is unavailable." }, { status: 503 });
-    history = (rows ?? []).reverse() as InferenceMessage[];
+    const storedMessages = (rows ?? []) as StoredMessage[];
+    const targetId = replaceFromMessageId ?? regenerateFromMessageId;
+    if (targetId) {
+      const targetIndex = storedMessages.findIndex((item) => item.id === targetId);
+      const expectedRole = replaceFromMessageId ? "user" : "assistant";
+      if (targetIndex < 0 || storedMessages[targetIndex]?.role !== expectedRole) {
+        return NextResponse.json({ message: "That message can no longer be changed. Reload and try again." }, { status: 409 });
+      }
+      history = storedMessages.slice(0, targetIndex).map(({ role, content }) => ({ role, content }));
+      messagesToDelete = storedMessages.slice(targetIndex).map((item) => item.id);
+      if (replaceFromMessageId && targetIndex === 0) {
+        threadTitle = makeThreadTitle(message);
+        shouldReplaceThreadTitle = true;
+      }
+    } else {
+      history = storedMessages.map(({ role, content }) => ({ role, content }));
+    }
   } else if (!user) {
     history = sanitizeHistory(body?.history);
   }
 
+  if (regenerateFromMessageId && !threadId) {
+    if (!history.length || history.at(-1)?.role !== "user") {
+      return NextResponse.json({ message: "There is no answer to regenerate." }, { status: 400 });
+    }
+    threadTitle = makeThreadTitle(history.find((item) => item.role === "user")?.content ?? "Untitled thought");
+  }
+
   let answer: string;
   try {
-    answer = await generateAnswer([...history, { role: "user", content: message }]);
+    const inferenceHistory = regenerateFromMessageId
+      ? history
+      : [...history, { role: "user" as const, content: message }];
+    answer = await generateAnswer(inferenceHistory.slice(-24));
   } catch {
     return NextResponse.json(
       { message: "The brain trust is temporarily unavailable. Try again in a moment." },
@@ -97,12 +143,13 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
-  const title = makeThreadTitle(message);
+  const userMessageId = regenerateFromMessageId ? null : crypto.randomUUID();
+  const assistantMessageId = crypto.randomUUID();
   if (user) {
     if (!threadId) {
       const { data: created, error } = await supabase
         .from("chat_threads")
-        .insert({ user_id: user.id, title })
+        .insert({ user_id: user.id, title: threadTitle })
         .select("id")
         .single();
       if (error || !created) {
@@ -110,10 +157,20 @@ export async function POST(request: Request) {
       }
       threadId = created.id;
     }
-    const { error } = await supabase.from("chat_messages").insert([
-      { thread_id: threadId, user_id: user.id, role: "user", content: message },
-      { thread_id: threadId, user_id: user.id, role: "assistant", content: answer },
-    ]);
+    const { error } = messagesToDelete.length
+      ? await supabase.rpc("replace_chat_branch", {
+          p_thread_id: threadId,
+          p_delete_message_ids: messagesToDelete,
+          p_user_message_id: userMessageId,
+          p_user_content: userMessageId ? message : null,
+          p_assistant_message_id: assistantMessageId,
+          p_assistant_content: answer,
+          p_title: shouldReplaceThreadTitle ? threadTitle : null,
+        })
+      : await supabase.from("chat_messages").insert([
+          { id: userMessageId, thread_id: threadId, user_id: user.id, role: "user", content: message },
+          { id: assistantMessageId, thread_id: threadId, user_id: user.id, role: "assistant", content: answer },
+        ]);
     if (error) {
       return NextResponse.json({ message: "The answer arrived, but the conversation could not be saved." }, { status: 503 });
     }
@@ -122,8 +179,11 @@ export async function POST(request: Request) {
   const nextUsed = user ? used : used + 1;
   const response = NextResponse.json({
     threadId,
-    title,
-    message: { id: crypto.randomUUID(), role: "assistant", content: answer, createdAt: now },
+    title: threadTitle,
+    userMessage: userMessageId
+      ? { id: userMessageId, role: "user", content: message, createdAt: now }
+      : null,
+    message: { id: assistantMessageId, role: "assistant", content: answer, createdAt: now },
     remainingGuestMessages: user ? null : remainingGuestMessages(nextUsed),
   });
   if (!user) {
@@ -137,4 +197,3 @@ export async function POST(request: Request) {
   }
   return response;
 }
-

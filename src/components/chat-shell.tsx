@@ -13,9 +13,10 @@ import {
   Menu,
   MessageSquareText,
   Moon,
+  Pencil,
+  RefreshCw,
   Search,
   SendHorizontal,
-  Sparkles,
   SquarePen,
   Sun,
   Trash2,
@@ -26,12 +27,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrandMark } from "./brand-mark";
+import { BreakOpenMark } from "./break-open-mark";
 import type { ChatMessage, ChatThread, Viewer } from "@/lib/types";
 
 type ChatShellProps = { initialViewer: Viewer };
 type ChatResponse = {
   threadId: string | null;
   title: string;
+  userMessage: ChatMessage | null;
   message: ChatMessage;
   remainingGuestMessages: number | null;
 };
@@ -85,7 +88,7 @@ function shortGreeting() {
   return "Evening";
 }
 
-function MarkdownMessage({ content }: { content: string }) {
+function CopyMessageAction({ content, label }: { content: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await navigator.clipboard.writeText(content);
@@ -93,14 +96,25 @@ function MarkdownMessage({ content }: { content: string }) {
     setTimeout(() => setCopied(false), 1_500);
   };
   return (
+    <button className="message-action" type="button" onClick={copy} aria-label={label}>
+      {copied ? <Check size={15} /> : <Copy size={15} />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function MarkdownMessage({ content, disabled, onRegenerate }: { content: string; disabled: boolean; onRegenerate: () => void }) {
+  return (
     <div className="assistant-response">
       <div className="markdown">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </div>
-      <button className="message-action" type="button" onClick={copy} aria-label="Copy answer">
-        {copied ? <Check size={15} /> : <Copy size={15} />}
-        {copied ? "Copied" : "Copy"}
-      </button>
+      <div className="message-actions">
+        <CopyMessageAction content={content} label="Copy answer" />
+        <button className="message-action" type="button" onClick={onRegenerate} disabled={disabled} aria-label="Regenerate answer">
+          <RefreshCw size={15} /> Regenerate
+        </button>
+      </div>
     </div>
   );
 }
@@ -117,6 +131,8 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editInput, setEditInput] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +179,8 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     setMessages([]);
     setInput("");
     setError("");
+    setEditingMessageId(null);
+    setEditInput("");
     setSidebarOpen(false);
     requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -171,6 +189,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     setCurrentThreadId(thread.id);
     setSidebarOpen(false);
     setError("");
+    setEditingMessageId(null);
     if (!viewer.authenticated) {
       setMessages(thread.messages ?? []);
       return;
@@ -197,24 +216,31 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     if (currentThreadId === threadId) newChat();
   };
 
-  const send = async (event?: FormEvent) => {
-    event?.preventDefault();
-    const text = input.trim();
-    if (!text || pending) return;
+  const requestAnswer = async ({
+    text,
+    baseMessages,
+    replaceFromMessageId,
+    regenerateFromMessageId,
+  }: {
+    text: string;
+    baseMessages: ChatMessage[];
+    replaceFromMessageId?: string;
+    regenerateFromMessageId?: string;
+  }) => {
+    const trimmedText = text.trim();
+    if ((!trimmedText && !regenerateFromMessageId) || pending) return false;
     if (!viewer.authenticated && remaining === 0) {
       setError("Guest brainpower exhausted. Sign in for unlimited conversations.");
-      return;
+      return false;
     }
 
-    const userMessage: ChatMessage = {
-      id: localId(), role: "user", content: text, createdAt: new Date().toISOString(),
+    const originalMessages = messages;
+    const optimisticUserMessage: ChatMessage | null = regenerateFromMessageId ? null : {
+      id: localId(), role: "user", content: trimmedText, createdAt: new Date().toISOString(),
     };
-    const previous = messages;
-    setMessages([...previous, userMessage]);
-    setInput("");
+    setMessages([...baseMessages, ...(optimisticUserMessage ? [optimisticUserMessage] : [])]);
     setError("");
     setPending(true);
-    if (composerRef.current) composerRef.current.style.height = "auto";
 
     try {
       const response = await fetch("/api/chat", {
@@ -222,8 +248,10 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           threadId: currentThreadId,
-          message: text,
-          history: viewer.authenticated ? undefined : previous.map(({ role, content }) => ({ role, content })),
+          message: trimmedText || undefined,
+          history: viewer.authenticated ? undefined : baseMessages.map(({ role, content }) => ({ role, content })),
+          replaceFromMessageId,
+          regenerateFromMessageId,
         }),
       });
       const payload = await response.json() as ChatResponse & { message?: ChatMessage | string };
@@ -231,33 +259,86 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         throw new Error(typeof payload.message === "string" ? payload.message : "No answer arrived.");
       }
 
-      const nextMessages = [...previous, userMessage, payload.message];
+      if (!regenerateFromMessageId && !payload.userMessage) throw new Error("The sent message could not be saved.");
+      const nextMessages = [
+        ...baseMessages,
+        ...(payload.userMessage ? [payload.userMessage] : []),
+        payload.message,
+      ];
       setMessages(nextMessages);
       setRemaining(payload.remainingGuestMessages);
       const resolvedId = payload.threadId ?? currentThreadId ?? localId();
       setCurrentThreadId(resolvedId);
       updateThreads((current) => {
         const existing = current.find((thread) => thread.id === resolvedId);
+        const editedFirstMessage = Boolean(replaceFromMessageId && baseMessages.length === 0);
         const updated: ChatThread = {
           id: resolvedId,
-          title: existing?.title ?? payload.title,
+          title: editedFirstMessage ? payload.title : existing?.title ?? payload.title,
           updatedAt: new Date().toISOString(),
           messages: viewer.authenticated ? undefined : nextMessages,
         };
         return [updated, ...current.filter((thread) => thread.id !== resolvedId)];
       });
+      return true;
     } catch (caught) {
+      setMessages(originalMessages);
       setError(caught instanceof Error ? caught.message : "Something broke. Even genius has infrastructure.");
+      return false;
     } finally {
       setPending(false);
     }
   };
 
-  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void send();
+  const send = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const text = input.trim();
+    if (!text || pending) return;
+    setInput("");
+    if (composerRef.current) composerRef.current.style.height = "auto";
+    const sent = await requestAnswer({ text, baseMessages: messages });
+    if (!sent) setInput(text);
+  };
+
+  const beginEdit = (message: ChatMessage) => {
+    if (pending) return;
+    setEditingMessageId(message.id);
+    setEditInput(message.content);
+    setError("");
+  };
+
+  const saveEdit = async (message: ChatMessage, index: number) => {
+    const text = editInput.trim();
+    if (!text || text === message.content || pending) return;
+    const sent = await requestAnswer({
+      text,
+      baseMessages: messages.slice(0, index),
+      replaceFromMessageId: message.id,
+    });
+    if (sent) {
+      setEditingMessageId(null);
+      setEditInput("");
     }
+  };
+
+  const regenerate = async (message: ChatMessage, index: number) => {
+    if (pending) return;
+    setEditingMessageId(null);
+    await requestAnswer({
+      text: "",
+      baseMessages: messages.slice(0, index),
+      regenerateFromMessageId: message.id,
+    });
+  };
+
+  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+
+    const isMobile = window.matchMedia("(max-width: 640px), (pointer: coarse)").matches;
+    if (isMobile) return;
+
+    event.preventDefault();
+    void send();
   };
 
   const resizeComposer = (value: string) => {
@@ -309,7 +390,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
             </div>
           )) : (
             <div className="empty-threads">
-              <Sparkles size={17} />
+              <BreakOpenMark size={17} />
               <p>{search ? "No thread matches that." : "Your next dangerous idea starts here."}</p>
             </div>
           )}
@@ -317,7 +398,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
 
         {!viewer.authenticated && (
           <div className="sidebar-upgrade">
-            <span className="upgrade-orbit"><Sparkles size={17} /></span>
+            <span className="upgrade-orbit"><BreakOpenMark size={17} /></span>
             <strong>Keep the good stuff.</strong>
             <p>Sign in for unlimited messages and history on every device.</p>
             <Link href="/auth/sign-in"><LogIn size={16} /> Sign in</Link>
@@ -348,7 +429,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
             <small><span /> Ready to think</small>
           </div>
           <div className="topbar-actions">
-            {!viewer.authenticated && <span className="message-meter"><Sparkles size={14} /> {remaining ?? 10} free</span>}
+            {!viewer.authenticated && <span className="message-meter"><BreakOpenMark size={14} /> {remaining ?? 10} free</span>}
             <button className="desktop-theme icon-button" type="button" onClick={toggleTheme} aria-label="Toggle theme">
               <Sun className="theme-sun" size={18} /><Moon className="theme-moon" size={18} />
             </button>
@@ -363,8 +444,8 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         <div className={messages.length ? "conversation has-messages" : "conversation"}>
           {!messages.length && !historyLoading ? (
             <section className="welcome">
-              <div className="welcome-sigil"><Sparkles size={27} /><span /></div>
-              <p className="eyebrow">{shortGreeting()}, {displayName}</p>
+              <div className="welcome-sigil"><BreakOpenMark size={29} /><span className="sigil-status" /></div>
+              <p className="eyebrow">Good {shortGreeting()}</p>
               <h1>What are we <em>breaking open</em> today?</h1>
               <p className="welcome-copy">
                 Bring the mess. I’ll bring the brains, the nerve, and a frankly unreasonable amount of confidence.
@@ -382,20 +463,50 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
             </section>
           ) : (
             <div className="message-stream">
-              {messages.map((message) => message.role === "user" ? (
+              {messages.map((message, index) => message.role === "user" ? (
                 <article className="message user-message" key={message.id}>
                   <div className="message-avatar user-avatar"><UserRound size={17} /></div>
-                  <div><span className="message-name">You</span><p>{message.content}</p></div>
+                  <div className="user-message-content">
+                    <span className="message-name">You</span>
+                    {editingMessageId === message.id ? (
+                      <div className="message-editor">
+                        <textarea
+                          value={editInput}
+                          onChange={(event) => setEditInput(event.target.value)}
+                          maxLength={12_000}
+                          rows={3}
+                          aria-label="Edit your message"
+                          autoFocus
+                        />
+                        <div>
+                          <button type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
+                          <button type="button" onClick={() => void saveEdit(message, index)} disabled={!editInput.trim() || editInput.trim() === message.content || pending}>
+                            <SendHorizontal size={14} /> Save & resend
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p>{message.content}</p>
+                        <div className="message-actions">
+                          <CopyMessageAction content={message.content} label="Copy your message" />
+                          <button className="message-action" type="button" onClick={() => beginEdit(message)} disabled={pending} aria-label="Edit and resend message">
+                            <Pencil size={14} /> Edit
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </article>
               ) : (
                 <article className="message assistant-message" key={message.id}>
-                  <div className="message-avatar ai-avatar"><Sparkles size={17} /></div>
-                  <div><span className="message-name">Busted Minds AI</span><MarkdownMessage content={message.content} /></div>
+                  <div className="message-avatar ai-avatar"><BreakOpenMark size={17} /></div>
+                  <div><span className="message-name">Busted Minds AI</span><MarkdownMessage content={message.content} disabled={pending} onRegenerate={() => void regenerate(message, index)} /></div>
                 </article>
               ))}
               {pending && (
                 <article className="message assistant-message thinking-message">
-                  <div className="message-avatar ai-avatar"><Sparkles size={17} /></div>
+                  <div className="message-avatar ai-avatar"><BreakOpenMark size={17} /></div>
                   <div><span className="message-name">Busted Minds AI</span><p><i /><i /><i /> Thinking harder than strictly necessary</p></div>
                 </article>
               )}
