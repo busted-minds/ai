@@ -1,46 +1,24 @@
-import type { User, UserIdentity } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
+import {
+  accountProfileProjection,
+  centralSubjectFromUser,
+  preferredUsernameFromUser,
+} from "@/lib/auth/shared-identity";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Viewer } from "@/lib/types";
 
-const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function centralSubjectFromUser(user: User): string | null {
-  const identity = user.identities?.find(
-    (candidate: UserIdentity) => candidate.provider === "custom:busted-minds",
-  );
-  const data = identity?.identity_data as Record<string, unknown> | undefined;
-  const candidates = [data?.sub, data?.user_id, identity?.identity_id, identity?.id];
-  return candidates.find(
-    (candidate): candidate is string =>
-      typeof candidate === "string" && uuidPattern.test(candidate),
-  ) ?? null;
-}
+export { centralSubjectFromUser, preferredUsernameFromUser } from "@/lib/auth/shared-identity";
 
 export async function synchronizeAccountProfile(user: User): Promise<string> {
-  const centralAccountId = centralSubjectFromUser(user);
-  if (!centralAccountId) {
-    throw new Error("The Busted Minds Account subject was not present in this session.");
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const metadata = user.user_metadata as Record<string, unknown>;
-  const displayName =
-    [metadata.full_name, metadata.name, metadata.display_name].find(
-      (value): value is string => typeof value === "string" && value.trim().length > 0,
-    )?.trim() ?? null;
+  const projection = accountProfileProjection(user);
+  const supabase = createSupabaseAdminClient();
   const { error } = await supabase.from("account_profiles").upsert(
-    {
-      id: user.id,
-      central_account_id: centralAccountId,
-      email: user.email ?? null,
-      display_name: displayName,
-      updated_at: new Date().toISOString(),
-    },
+    projection,
     { onConflict: "id" },
   );
   if (error) throw error;
-  return centralAccountId;
+  return projection.central_account_id;
 }
 
 export async function loadViewer(): Promise<Viewer> {
@@ -48,10 +26,27 @@ export async function loadViewer(): Promise<Viewer> {
     const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user || data.user.is_anonymous) {
-      return { authenticated: false, id: null, email: null, name: null, centralAccountId: null };
+      return { authenticated: false, id: null, email: null, name: null, username: null, centralAccountId: null };
     }
 
     const centralAccountId = centralSubjectFromUser(data.user);
+    const oidcUsername = preferredUsernameFromUser(data.user);
+    const { data: profile } = await supabase
+      .from("account_profiles")
+      .select("central_account_id,username")
+      .eq("id", data.user.id)
+      .maybeSingle();
+    const storedUsername = typeof profile?.username === "string" ? profile.username : null;
+
+    if (centralAccountId && oidcUsername && storedUsername !== oidcUsername) {
+      try {
+        await synchronizeAccountProfile(data.user);
+      } catch {
+        // The verified OIDC claim can still be shown for this request. The
+        // callback and live backfill remain the durable synchronization paths.
+      }
+    }
+
     const metadata = data.user.user_metadata as Record<string, unknown>;
     const name = [metadata.full_name, metadata.name, metadata.display_name].find(
       (value): value is string => typeof value === "string" && value.trim().length > 0,
@@ -61,10 +56,12 @@ export async function loadViewer(): Promise<Viewer> {
       id: data.user.id,
       email: data.user.email ?? null,
       name,
-      centralAccountId,
+      username: oidcUsername ?? storedUsername,
+      centralAccountId:
+        centralAccountId ??
+        (typeof profile?.central_account_id === "string" ? profile.central_account_id : null),
     };
   } catch {
-    return { authenticated: false, id: null, email: null, name: null, centralAccountId: null };
+    return { authenticated: false, id: null, email: null, name: null, username: null, centralAccountId: null };
   }
 }
-

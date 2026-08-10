@@ -19,6 +19,6 @@ export type Viewer = {
   id: string | null;
   email: string | null;
   name: string | null;
+  username: string | null;
   centralAccountId: string | null;
 };
-

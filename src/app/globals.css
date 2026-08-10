@@ -238,6 +238,7 @@ button { color: inherit; }
 .account-details { display: grid; gap: 1px; overflow: hidden; margin: 25px 0 0; border: 1px solid var(--border); border-radius: 15px; background: var(--border); }
 .account-details div { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 13px 15px; background: var(--surface-raised); text-align: left; }
 .account-details dt { color: var(--faint); font-size: 10px; font-weight: 800; }.account-details dd { margin: 0; color: var(--text-soft); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+.account-identity-note { margin: 13px auto 0; color: var(--faint); font-size: 9px; line-height: 1.6; }
 
 @keyframes shimmer { to { background-position: -200% 0; } }
 @keyframes message-in { from { opacity: 0; transform: translateY(8px); } }

@@ -414,7 +414,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         <div className="sidebar-foot">
           <Link href={viewer.authenticated ? "/account" : "/auth/sign-in"} className="account-link">
             <span className="avatar"><UserRound size={17} /></span>
-            <span><strong>{viewer.authenticated ? displayName : "Guest mind"}</strong><small>{viewer.authenticated ? "Busted Minds Account" : `${remaining ?? 10} messages left`}</small></span>
+            <span><strong>{viewer.authenticated ? displayName : "Guest mind"}</strong><small>{viewer.authenticated ? (viewer.username ? `@${viewer.username}` : "Busted Minds Account") : `${remaining ?? 10} messages left`}</small></span>
             <ArrowUpRight size={15} />
           </Link>
           <button type="button" className="theme-button" onClick={toggleTheme} aria-label="Toggle color theme">
@@ -437,7 +437,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
               <Sun className="theme-sun" size={18} /><Moon className="theme-moon" size={18} />
             </button>
             {viewer.authenticated ? (
-              <Link href="/account" className="top-account"><UserRound size={17} /><span>{displayName}</span></Link>
+              <Link href="/account" className="top-account"><UserRound size={17} /><span>{viewer.username ? `@${viewer.username}` : displayName}</span></Link>
             ) : (
               <Link href="/auth/sign-in" className="top-signin"><span>Sign in</span><ArrowUpRight size={16} /></Link>
             )}
