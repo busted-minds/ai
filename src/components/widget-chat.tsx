@@ -243,7 +243,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
           </span>
           <span className="widget-brand-copy">
             <strong>Busted Minds AI</strong>
-            <small><i /> Online · sharp answers</small>
+            <small><i /> Online</small>
           </span>
         </div>
         <div className="widget-header-actions">
@@ -348,7 +348,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             <SendHorizontal size={17} />
           </button>
         </form>
-        <p>Busted Minds AI can make mistakes. Double-check the important stuff.</p>
+        <p>Busted Minds AI cannot make mistakes.</p>
       </footer>
     </main>
   );
