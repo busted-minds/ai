@@ -2,9 +2,26 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
 
+function applySecurityHeaders(response: NextResponse, pathname: string) {
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  if (pathname === "/widget") {
+    response.headers.delete("X-Frame-Options");
+    response.headers.set("Content-Security-Policy", "frame-ancestors *");
+  } else {
+    response.headers.set("X-Frame-Options", "DENY");
+    response.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  }
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
   const config = getSupabasePublicConfig();
-  if (!config) return NextResponse.next({ request });
+  if (!config) {
+    return applySecurityHeaders(NextResponse.next({ request }), request.nextUrl.pathname);
+  }
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(config.url, config.publishableKey, {
@@ -28,12 +45,11 @@ export async function proxy(request: NextRequest) {
     destination.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
     const redirect = NextResponse.redirect(destination);
     for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
-    return redirect;
+    return applySecurityHeaders(redirect, request.nextUrl.pathname);
   }
-  return response;
+  return applySecurityHeaders(response, request.nextUrl.pathname);
 }
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };
-
