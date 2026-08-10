@@ -13,6 +13,8 @@ import {
   Menu,
   MessageSquareText,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   RefreshCw,
   Search,
@@ -134,6 +136,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editInput, setEditInput] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -361,11 +364,21 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const displayName = viewer.name?.split(" ")[0] || viewer.email?.split("@")[0] || "sharp mind";
 
   return (
-    <main className="app-shell">
+    <main className={desktopSidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <div className={sidebarOpen ? "sidebar-backdrop is-open" : "sidebar-backdrop"} onClick={() => setSidebarOpen(false)} aria-hidden />
-      <aside className={sidebarOpen ? "sidebar is-open" : "sidebar"}>
+      <aside id="conversation-sidebar" className={sidebarOpen ? "sidebar is-open" : "sidebar"}>
         <div className="sidebar-head">
           <BrandMark priority />
+          <button
+            className="sidebar-collapse-button icon-button"
+            type="button"
+            onClick={() => setDesktopSidebarCollapsed(true)}
+            aria-label="Collapse conversations sidebar"
+            aria-controls="conversation-sidebar"
+            aria-expanded="true"
+          >
+            <PanelLeftClose size={18} />
+          </button>
           <button className="mobile-close icon-button" type="button" onClick={() => setSidebarOpen(false)} aria-label="Close conversations">
             <X size={19} />
           </button>
@@ -425,7 +438,17 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
 
       <section className="chat-stage">
         <header className="topbar">
-          <button className="icon-button menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open conversations"><Menu size={20} /></button>
+          <button
+            className="icon-button sidebar-expand-button"
+            type="button"
+            onClick={() => setDesktopSidebarCollapsed(false)}
+            aria-label="Expand conversations sidebar"
+            aria-controls="conversation-sidebar"
+            aria-expanded="false"
+          >
+            <PanelLeftOpen size={19} />
+          </button>
+          <button className="icon-button menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open conversations" aria-controls="conversation-sidebar"><Menu size={20} /></button>
           <BrandMark compact />
           <div className="thread-heading">
             <strong>{currentThread?.title ?? "New conversation"}</strong>
@@ -534,7 +557,6 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 disabled={pending || (!viewer.authenticated && remaining === 0)}
               />
               <div className="composer-bottom">
-                <span>{input.length > 10_000 ? `${input.length.toLocaleString()} / 12,000` : "Shift + Enter for a new line"}</span>
                 <button type="submit" disabled={!input.trim() || pending || (!viewer.authenticated && remaining === 0)} aria-label="Send message">
                   <SendHorizontal size={19} />
                 </button>
