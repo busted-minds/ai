@@ -8,8 +8,10 @@ function applySecurityHeaders(response: NextResponse, pathname: string) {
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 
   if (pathname === "/widget") {
+    // This route is intentionally public and embeddable, including from local
+    // file:// prototypes whose opaque origins do not reliably match `*`.
     response.headers.delete("X-Frame-Options");
-    response.headers.set("Content-Security-Policy", "frame-ancestors *");
+    response.headers.delete("Content-Security-Policy");
   } else {
     response.headers.set("X-Frame-Options", "DENY");
     response.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
