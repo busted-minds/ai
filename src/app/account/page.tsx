@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CircleCheck, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
 import { ThemeLogo } from "@/components/brand-mark";
 import { loadViewer } from "@/lib/auth/viewer";
@@ -10,9 +10,14 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function AccountPage() {
-  const viewer = await loadViewer();
+type AccountPageProps = {
+  searchParams: Promise<{ password?: string | string[] }>;
+};
+
+export default async function AccountPage({ searchParams }: AccountPageProps) {
+  const [viewer, query] = await Promise.all([loadViewer(), searchParams]);
   if (!viewer.authenticated) redirect("/auth/sign-in?next=/account");
+  const passwordUpdated = (Array.isArray(query.password) ? query.password[0] : query.password) === "updated";
   return (
     <main className="center-page">
       <section className="auth-card account-card">
@@ -20,6 +25,12 @@ export default async function AccountPage() {
         <span className="eyebrow"><ShieldCheck size={14} /> Busted Minds Account</span>
         <h1>You’re synced.</h1>
         <p>Your threads and username follow your Busted Minds Account across apps and devices.</p>
+        {passwordUpdated && (
+          <div className="account-success" role="status">
+            <CircleCheck aria-hidden size={19} />
+            <span><strong>Password updated.</strong> You’re securely back in Busted Minds AI.</span>
+          </div>
+        )}
         <dl className="account-details">
           <div><dt>Username</dt><dd>{viewer.username ? `@${viewer.username}` : "Syncs at next sign-in"}</dd></div>
           <div><dt>Email</dt><dd>{viewer.email ?? "Private account"}</dd></div>

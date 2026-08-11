@@ -254,6 +254,8 @@ button { color: inherit; }
 .account-card { text-align: center; }
 .account-card > .auth-logo { display: block; margin-right: auto; margin-left: auto; }
 .account-card .auth-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.account-success { display: flex; align-items: center; gap: 11px; margin-top: 20px; padding: 13px 15px; border: 1px solid rgba(82, 213, 138, .22); border-radius: 13px; background: rgba(82, 213, 138, .08); color: #52d58a; text-align: left; }
+.account-success svg { flex: 0 0 auto; }.account-success span { color: var(--text-soft); font-size: 11px; line-height: 1.55; }.account-success strong { display: block; color: #52d58a; font-size: 12px; }
 .account-details { display: grid; gap: 1px; overflow: hidden; margin: 25px 0 0; border: 1px solid var(--border); border-radius: 15px; background: var(--border); }
 .account-details div { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 13px 15px; background: var(--surface-raised); text-align: left; }
 .account-details dt { color: var(--faint); font-size: 10px; font-weight: 800; }.account-details dd { margin: 0; color: var(--text-soft); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
