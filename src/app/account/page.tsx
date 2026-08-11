@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowLeft, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
 import { ThemeLogo } from "@/components/brand-mark";
 import { loadViewer } from "@/lib/auth/viewer";
@@ -24,6 +24,7 @@ export default async function AccountPage() {
         <p className="account-identity-note">Your username is managed by Busted Minds Account and cannot be edited in BMAI.</p>
         <div className="auth-actions">
           <Link className="ghost-button" href="/"><ArrowLeft size={17} /> Back to chat</Link>
+          <Link className="ghost-button" href="https://accounts.bustedminds.us.kg/auth?mode=forgot&source=bmai"><KeyRound size={17} /> Reset password</Link>
           <form action="/auth/sign-out" method="post">
             <button className="danger-button" type="submit"><LogOut size={17} /> Sign out</button>
           </form>

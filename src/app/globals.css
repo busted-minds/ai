@@ -199,6 +199,7 @@ button { color: inherit; }
 .user-message:hover .user-message-actions, .user-message:focus-within .user-message-actions { opacity: 1; visibility: visible; pointer-events: auto; }
 .message-action { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--faint); cursor: pointer; font-size: 9px; font-weight: 800; }
 .message-action:hover:not(:disabled) { border-color: var(--border); background: var(--surface-raised); color: var(--text-soft); }
+.search-answer-action:hover:not(:disabled) { border-color: rgba(56, 215, 242, .25); color: var(--cyan); }
 .message-action:disabled { cursor: not-allowed; opacity: .45; }
 .message-editor { width: 100%; padding: 10px; border: 1px solid rgba(56, 215, 242, .3); border-radius: 15px 4px 15px 15px; background: var(--surface-raised); box-shadow: 0 0 0 3px rgba(56, 215, 242, .055); }
 .message-editor textarea { display: block; width: 100%; min-height: 90px; max-height: 260px; resize: vertical; padding: 3px 5px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; line-height: 1.7; }
@@ -241,7 +242,7 @@ button { color: inherit; }
 .primary-button { border: 0; background: var(--cyan); color: #061317; }.ghost-button { border: 1px solid var(--border-strong); background: var(--surface-raised); }.danger-button { border: 1px solid rgba(255, 119, 110, .22); background: transparent; color: var(--danger); }
 .account-card { text-align: center; }
 .account-card > .auth-logo { display: block; margin-right: auto; margin-left: auto; }
-.account-card .auth-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.account-card .auth-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .account-details { display: grid; gap: 1px; overflow: hidden; margin: 25px 0 0; border: 1px solid var(--border); border-radius: 15px; background: var(--border); }
 .account-details div { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 13px 15px; background: var(--surface-raised); text-align: left; }
 .account-details dt { color: var(--faint); font-size: 10px; font-weight: 800; }.account-details dd { margin: 0; color: var(--text-soft); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
@@ -488,8 +489,12 @@ button { color: inherit; }
 .widget-markdown pre code { padding: 0; border: 0; background: transparent; color: #e8e8ea; }
 .widget-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .widget-markdown th, .widget-markdown td { padding: 5px 7px; border: 1px solid var(--w-border-strong); text-align: left; }
-.widget-copy { display: inline-flex; height: 25px; align-items: center; gap: 4px; margin-top: 7px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: var(--w-faint); cursor: pointer; font-size: 8px; font-weight: 700; }
-.widget-copy:hover { background: var(--w-raised); color: var(--w-text-soft); }
+.widget-answer-actions { display: flex; align-items: center; gap: 2px; margin-top: 7px; }
+.widget-copy, .widget-search-answer { display: inline-flex; height: 25px; align-items: center; gap: 4px; padding: 0 7px; border: 0; border-radius: 7px; background: transparent; color: var(--w-faint); cursor: pointer; font-size: 8px; font-weight: 700; }
+.widget-copy { margin-top: 0; }
+.widget-copy:hover, .widget-search-answer:hover:not(:disabled) { background: var(--w-raised); color: var(--w-text-soft); }
+.widget-search-answer:hover:not(:disabled) { color: var(--w-cyan); }
+.widget-search-answer:disabled { cursor: not-allowed; opacity: .45; }
 .widget-thinking > p { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--w-muted); font-size: 10px; }
 .widget-thinking > p i { width: 4px; height: 4px; border-radius: 50%; background: var(--w-cyan); animation: widget-pulse 1s infinite ease-in-out; }
 .widget-thinking > p i:nth-child(2) { animation-delay: .13s; }.widget-thinking > p i:nth-child(3) { animation-delay: .26s; }

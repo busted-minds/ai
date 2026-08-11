@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Lightbulb,
   LogIn,
+  Search,
   SendHorizontal,
   Sparkles,
   X,
@@ -203,6 +204,48 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     }
   };
 
+  const regenerateWithSearch = async (message: ChatMessage, index: number) => {
+    if (pending) return;
+    if (!initialViewer.authenticated && remaining === 0) {
+      setError("Your 10 guest messages are used. Sign in to keep going.");
+      return;
+    }
+
+    const originalMessages = messages;
+    const baseMessages = messages.slice(0, index);
+    setMessages(baseMessages);
+    setError("");
+    setPending(true);
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadId,
+          history: initialViewer.authenticated
+            ? undefined
+            : baseMessages.map(({ role, content }) => ({ role, content })),
+          regenerateFromMessageId: message.id,
+          useSearch: true,
+        }),
+      });
+      const payload = (await response.json()) as ChatResponse & { message?: ChatMessage | string };
+      if (!response.ok || !payload.message || typeof payload.message === "string") {
+        if (response.status === 429) setRemaining(0);
+        throw new Error(typeof payload.message === "string" ? payload.message : "No answer arrived.");
+      }
+      setMessages([...baseMessages, payload.message]);
+      setThreadId(payload.threadId);
+      setRemaining(payload.remainingGuestMessages);
+    } catch (caught) {
+      setMessages(originalMessages);
+      setError(caught instanceof Error ? caught.message : "Something broke. Try that again.");
+    } finally {
+      setPending(false);
+    }
+  };
+
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     if (window.matchMedia("(pointer: coarse)").matches) return;
@@ -292,7 +335,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             </div>
           )}
 
-          {messages.map((message) => message.role === "user" ? (
+          {messages.map((message, index) => message.role === "user" ? (
             <article className="widget-message widget-user-message" key={message.id}>
               <span>You</span>
               <p>{message.content}</p>
@@ -303,7 +346,20 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
               <div className="widget-markdown">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
               </div>
-              <CopyAnswer content={message.content} />
+              <div className="widget-answer-actions">
+                <CopyAnswer content={message.content} />
+                <button
+                  className="widget-search-answer"
+                  type="button"
+                  onClick={() => void regenerateWithSearch(message, index)}
+                  disabled={pending}
+                  aria-label="Regenerate answer with DuckDuckGo search"
+                  title="Regenerate with DuckDuckGo search"
+                >
+                  <Search size={13} />
+                  <span>Search</span>
+                </button>
+              </div>
             </article>
           ))}
 
@@ -348,7 +404,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             <SendHorizontal size={17} />
           </button>
         </form>
-        <p>Busted Minds AI cannot make mistakes.</p>
+        {!messages.length && <p>Busted Minds AI cannot make mistakes.</p>}
       </footer>
     </main>
   );

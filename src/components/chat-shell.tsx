@@ -18,6 +18,7 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Globe,
   SendHorizontal,
   SquarePen,
   Sun,
@@ -108,7 +109,17 @@ function CopyMessageAction({ content, label }: { content: string; label: string 
   );
 }
 
-function MarkdownMessage({ content, disabled, onRegenerate }: { content: string; disabled: boolean; onRegenerate: () => void }) {
+function MarkdownMessage({
+  content,
+  disabled,
+  onRegenerate,
+  onRegenerateWithSearch,
+}: {
+  content: string;
+  disabled: boolean;
+  onRegenerate: () => void;
+  onRegenerateWithSearch: () => void;
+}) {
   return (
     <div className="assistant-response">
       <div className="markdown">
@@ -118,6 +129,16 @@ function MarkdownMessage({ content, disabled, onRegenerate }: { content: string;
         <CopyMessageAction content={content} label="Copy answer" />
         <button className="message-action" type="button" onClick={onRegenerate} disabled={disabled} aria-label="Regenerate answer">
           <RefreshCw size={15} />
+        </button>
+        <button
+          className="message-action search-answer-action"
+          type="button"
+          onClick={onRegenerateWithSearch}
+          disabled={disabled}
+          aria-label="Regenerate answer with DuckDuckGo search"
+          title="Regenerate with DuckDuckGo search"
+        >
+          <Globe size={15} />
         </button>
       </div>
     </div>
@@ -227,11 +248,13 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     baseMessages,
     replaceFromMessageId,
     regenerateFromMessageId,
+    useSearch,
   }: {
     text: string;
     baseMessages: ChatMessage[];
     replaceFromMessageId?: string;
     regenerateFromMessageId?: string;
+    useSearch?: boolean;
   }) => {
     const trimmedText = text.trim();
     if ((!trimmedText && !regenerateFromMessageId) || pending) return false;
@@ -258,6 +281,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
           history: viewer.authenticated ? undefined : baseMessages.map(({ role, content }) => ({ role, content })),
           replaceFromMessageId,
           regenerateFromMessageId,
+          useSearch,
         }),
       });
       const payload = await response.json() as ChatResponse & { message?: ChatMessage | string };
@@ -334,6 +358,17 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
       text: "",
       baseMessages: messages.slice(0, index),
       regenerateFromMessageId: message.id,
+    });
+  };
+
+  const regenerateWithSearch = async (message: ChatMessage, index: number) => {
+    if (pending) return;
+    setEditingMessageId(null);
+    await requestAnswer({
+      text: "",
+      baseMessages: messages.slice(0, index),
+      regenerateFromMessageId: message.id,
+      useSearch: true,
     });
   };
 
@@ -524,7 +559,14 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 </article>
               ) : (
                 <article className="message assistant-message" key={message.id}>
-                  <div><MarkdownMessage content={message.content} disabled={pending} onRegenerate={() => void regenerate(message, index)} /></div>
+                  <div>
+                    <MarkdownMessage
+                      content={message.content}
+                      disabled={pending}
+                      onRegenerate={() => void regenerate(message, index)}
+                      onRegenerateWithSearch={() => void regenerateWithSearch(message, index)}
+                    />
+                  </div>
                 </article>
               ))}
               {pending && (
@@ -562,9 +604,11 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 </button>
               </div>
             </form>
-            <p className="fine-print">
-              Busted Minds AI cannot make mistakes.
-            </p>
+            {!messages.length && (
+              <p className="fine-print">
+                Busted Minds AI cannot make mistakes.
+              </p>
+            )}
           </div>
         </div>
       </section>

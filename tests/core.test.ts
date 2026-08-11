@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth/guest-usage";
 import { makeThreadTitle } from "@/lib/chat-data";
 import { safeNextPath } from "@/lib/security";
+import { duckDuckGoQuery, shouldUseDuckDuckGo } from "@/lib/ai/duckduckgo";
 
 process.env.ANON_USAGE_SECRET = "test-only-secret-with-enough-entropy";
 
@@ -37,3 +38,15 @@ describe("thread titles", () => {
   });
 });
 
+describe("DuckDuckGo search routing", () => {
+  it("recognizes requests that need fresh or explicitly searched information", () => {
+    expect(shouldUseDuckDuckGo("What is the latest Node.js version?")).toBe(true);
+    expect(shouldUseDuckDuckGo("Search the web for Busted Minds")).toBe(true);
+    expect(shouldUseDuckDuckGo("Explain recursion with an analogy")).toBe(false);
+  });
+
+  it("removes search instructions from the Instant Answer query", () => {
+    expect(duckDuckGoQuery("Please search the web for the current USD JPY exchange rate"))
+      .toBe("the current USD JPY exchange rate");
+  });
+});

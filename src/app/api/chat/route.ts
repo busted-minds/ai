@@ -19,6 +19,7 @@ type ChatRequest = {
   history?: unknown;
   replaceFromMessageId?: unknown;
   regenerateFromMessageId?: unknown;
+  useSearch?: unknown;
 };
 
 type StoredMessage = InferenceMessage & {
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
   const regenerateFromMessageId = typeof body?.regenerateFromMessageId === "string"
     ? body.regenerateFromMessageId
     : null;
+  const useSearch = body?.useSearch === true;
   if (replaceFromMessageId && regenerateFromMessageId) {
     return NextResponse.json({ message: "Choose either edit or regenerate." }, { status: 400 });
   }
@@ -137,7 +139,7 @@ export async function POST(request: Request) {
     const inferenceHistory = regenerateFromMessageId
       ? history
       : [...history, { role: "user" as const, content: message }];
-    answer = await generateAnswer(inferenceHistory.slice(-24));
+    answer = await generateAnswer(inferenceHistory.slice(-24), { forceSearch: useSearch });
   } catch {
     return NextResponse.json(
       { message: "The brain trust is temporarily unavailable. Try again in a moment." },
