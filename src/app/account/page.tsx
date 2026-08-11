@@ -28,7 +28,7 @@ export default async function AccountPage() {
         <p className="account-identity-note">Your username is managed by Busted Minds Account and cannot be edited in BMAI.</p>
         <div className="auth-actions">
           <Link className="ghost-button" href="/"><ArrowLeft size={17} /> Back to chat</Link>
-          <Link className="ghost-button" href="https://accounts.bustedminds.us.kg/auth?mode=forgot&source=bmai"><KeyRound size={17} /> Reset password</Link>
+          <Link className="ghost-button" href="https://accounts.bustedminds.us.kg/auth?mode=forgot&source=bmai&next=%2Faccount"><KeyRound size={17} /> Reset password</Link>
           <form action="/auth/sign-out" method="post">
             <button className="danger-button" type="submit"><LogOut size={17} /> Sign out</button>
           </form>
