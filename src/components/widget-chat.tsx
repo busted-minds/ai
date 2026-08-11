@@ -363,7 +363,6 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
 
           {pending && (
             <article className="widget-message widget-ai-message widget-thinking">
-              <div className="widget-message-label"><Sparkles size={12} /> Busted Minds</div>
               <p><i /><i /><i /> Breaking that open…</p>
             </article>
           )}

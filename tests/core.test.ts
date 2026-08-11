@@ -8,6 +8,12 @@ import {
 import { makeThreadTitle } from "@/lib/chat-data";
 import { safeNextPath } from "@/lib/security";
 import { duckDuckGoQuery, shouldUseDuckDuckGo } from "@/lib/ai/duckduckgo";
+import {
+  DEFAULT_CHAT_MODE,
+  normalizeChatMode,
+  resolveInferenceTier,
+} from "@/lib/ai/modes";
+import { MODEL_POOLS } from "@/lib/ai/model-pools";
 
 process.env.ANON_USAGE_SECRET = "test-only-secret-with-enough-entropy";
 
@@ -48,5 +54,25 @@ describe("DuckDuckGo search routing", () => {
   it("removes search instructions from the Instant Answer query", () => {
     expect(duckDuckGoQuery("Please search the web for the current USD JPY exchange rate"))
       .toBe("the current USD JPY exchange rate");
+  });
+});
+
+describe("chat mode routing", () => {
+  it("defaults invalid and missing modes to Fast", () => {
+    expect(DEFAULT_CHAT_MODE).toBe("fast");
+    expect(normalizeChatMode(undefined)).toBe("fast");
+    expect(normalizeChatMode("turbo")).toBe("fast");
+  });
+
+  it("uses separate Fast and Expert model pools", () => {
+    expect(MODEL_POOLS.fast[0]?.model).toBe("openai/gpt-oss-20b");
+    expect(MODEL_POOLS.expert[0]?.model).toBe("nvidia/nemotron-3-ultra-550b-a55b:free");
+    expect(MODEL_POOLS.fast.map(({ model }) => model)).not.toEqual(MODEL_POOLS.expert.map(({ model }) => model));
+  });
+
+  it("lets Auto promote complex prompts to the Expert pool", () => {
+    expect(resolveInferenceTier("auto", "What is entropy?")).toBe("fast");
+    expect(resolveInferenceTier("auto", "Audit this security architecture and explain the trade-offs.")).toBe("expert");
+    expect(resolveInferenceTier("expert", "Hello")).toBe("expert");
   });
 });

@@ -4,7 +4,9 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   ArrowUpRight,
+  BrainCircuit,
   Check,
+  ChevronDown,
   Code2,
   Compass,
   Copy,
@@ -20,17 +22,24 @@ import {
   Search,
   Globe,
   SendHorizontal,
+  Sparkles,
   SquarePen,
   Sun,
   Trash2,
   UserRound,
   X,
+  Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrandMark } from "./brand-mark";
 import { BustedBulbMark } from "./busted-bulb-mark";
+import {
+  CHAT_MODE_OPTIONS,
+  DEFAULT_CHAT_MODE,
+  type ChatMode,
+} from "@/lib/ai/modes";
 import type { ChatMessage, ChatThread, Viewer } from "@/lib/types";
 
 type ChatShellProps = { initialViewer: Viewer };
@@ -112,6 +121,87 @@ function CopyMessageAction({ content, label }: { content: string; label: string 
   );
 }
 
+function ChatModeIcon({ mode, size = 15 }: { mode: ChatMode; size?: number }) {
+  if (mode === "expert") return <BrainCircuit size={size} />;
+  if (mode === "auto") return <Sparkles size={size} />;
+  return <Zap size={size} />;
+}
+
+function ChatModePicker({
+  mode,
+  onChange,
+  disabled,
+}: {
+  mode: ChatMode;
+  onChange: (mode: ChatMode) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const selectedMode = CHAT_MODE_OPTIONS.find((option) => option.value === mode) ?? CHAT_MODE_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="mode-picker" ref={pickerRef}>
+      {open && (
+        <div className="mode-menu" role="menu" aria-label="AI response mode">
+          {CHAT_MODE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              className={option.value === mode ? "mode-option is-selected" : "mode-option"}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option.value === mode}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span className={`mode-option-icon mode-option-icon-${option.value}`}>
+                <ChatModeIcon mode={option.value} size={16} />
+              </span>
+              <span className="mode-option-copy">
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              {option.value === mode && <Check size={15} />}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        className={`mode-trigger mode-trigger-${mode}`}
+        type="button"
+        aria-label={`Response mode: ${selectedMode.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        disabled={disabled}
+        title={`Response mode: ${selectedMode.label}`}
+      >
+        <ChatModeIcon mode={mode} />
+        <span>{selectedMode.label}</span>
+        <ChevronDown className="mode-trigger-chevron" size={13} />
+      </button>
+    </div>
+  );
+}
+
 function MarkdownMessage({
   content,
   disabled,
@@ -154,6 +244,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
   const [pending, setPending] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(viewer.authenticated);
   const [remaining, setRemaining] = useState<number | null>(viewer.authenticated ? null : 10);
@@ -285,6 +376,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
           replaceFromMessageId,
           regenerateFromMessageId,
           useSearch,
+          mode,
         }),
       });
       const payload = await response.json() as ChatResponse & { message?: ChatMessage | string };
@@ -521,14 +613,12 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 a frankly unreasonable amount of confidence.
               </p>
               <div className="starter-grid">
-                {starterPrompts.map(({ icon: Icon, eyebrow, title, description, prompt }, index) => (
+                {starterPrompts.map(({ icon: Icon, eyebrow, title, description, prompt }) => (
                   <button key={title} type="button" onClick={() => { setInput(prompt); requestAnimationFrame(() => composerRef.current?.focus()); }}>
-                    <span className="starter-number">0{index + 1}</span>
                     <span className="starter-icon"><Icon size={19} /></span>
                     <small>{eyebrow}</small>
                     <strong>{title}</strong>
                     <p>{description}</p>
-                    <ArrowUpRight size={17} />
                   </button>
                 ))}
               </div>
@@ -582,7 +672,16 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
               ))}
               {pending && (
                 <article className="message assistant-message thinking-message">
-                  <div><p><i /><i /><i /> Thinking harder than strictly necessary</p></div>
+                  <div>
+                    <p>
+                      <i /><i /><i />
+                      {mode === "expert"
+                        ? "Working through the hard parts"
+                        : mode === "auto"
+                          ? "Choosing the right brain for this"
+                          : "Moving fast"}
+                    </p>
+                  </div>
                 </article>
               )}
               <div ref={endRef} />
@@ -610,7 +709,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 disabled={pending || (!viewer.authenticated && remaining === 0)}
               />
               <div className="composer-bottom">
-                <span>Enter to send · Shift + Enter for a new line</span>
+                <ChatModePicker key={pending ? "mode-busy" : "mode-ready"} mode={mode} onChange={setMode} disabled={pending} />
                 <button type="submit" disabled={!input.trim() || pending || (!viewer.authenticated && remaining === 0)} aria-label="Send message">
                   <SendHorizontal size={19} />
                 </button>

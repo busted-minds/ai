@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { generateAnswer, type InferenceMessage } from "@/lib/ai/providers";
+import { normalizeChatMode } from "@/lib/ai/modes";
 import { makeThreadTitle } from "@/lib/chat-data";
 import {
   decodeGuestUsage,
@@ -20,6 +21,7 @@ type ChatRequest = {
   replaceFromMessageId?: unknown;
   regenerateFromMessageId?: unknown;
   useSearch?: unknown;
+  mode?: unknown;
 };
 
 type StoredMessage = InferenceMessage & {
@@ -59,6 +61,7 @@ export async function POST(request: Request) {
     ? body.regenerateFromMessageId
     : null;
   const useSearch = body?.useSearch === true;
+  const mode = normalizeChatMode(body?.mode);
   if (replaceFromMessageId && regenerateFromMessageId) {
     return NextResponse.json({ message: "Choose either edit or regenerate." }, { status: 400 });
   }
@@ -139,7 +142,7 @@ export async function POST(request: Request) {
     const inferenceHistory = regenerateFromMessageId
       ? history
       : [...history, { role: "user" as const, content: message }];
-    answer = await generateAnswer(inferenceHistory.slice(-24), { forceSearch: useSearch });
+    answer = await generateAnswer(inferenceHistory.slice(-24), { forceSearch: useSearch, mode });
   } catch {
     return NextResponse.json(
       { message: "The brain trust is temporarily unavailable. Try again in a moment." },
