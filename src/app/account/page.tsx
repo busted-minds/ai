@@ -1,10 +1,14 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
 import { ThemeLogo } from "@/components/brand-mark";
 import { loadViewer } from "@/lib/auth/viewer";
 
-export const metadata = { title: "Your account" };
+export const metadata: Metadata = {
+  title: "Your account",
+  robots: { index: false, follow: false },
+};
 
 export default async function AccountPage() {
   const viewer = await loadViewer();

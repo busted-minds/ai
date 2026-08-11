@@ -10,7 +10,7 @@ import {
   ExternalLink,
   Lightbulb,
   LogIn,
-  Search,
+  Globe,
   SendHorizontal,
   Sparkles,
   X,
@@ -337,12 +337,10 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
 
           {messages.map((message, index) => message.role === "user" ? (
             <article className="widget-message widget-user-message" key={message.id}>
-              <span>You</span>
               <p>{message.content}</p>
             </article>
           ) : (
             <article className="widget-message widget-ai-message" key={message.id}>
-              <div className="widget-message-label"><Sparkles size={12} /> Busted Minds</div>
               <div className="widget-markdown">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
               </div>
@@ -356,7 +354,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
                   aria-label="Regenerate answer with DuckDuckGo search"
                   title="Regenerate with DuckDuckGo search"
                 >
-                  <Search size={13} />
+                  <Globe size={13} />
                   <span>Search</span>
                 </button>
               </div>

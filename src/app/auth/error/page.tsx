@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, RefreshCw, ShieldAlert } from "lucide-react";
 import { ThemeLogo } from "@/components/brand-mark";
 
-export const metadata = { title: "Sign-in trouble" };
+export const metadata: Metadata = {
+  title: "Sign-in trouble",
+  robots: { index: false, follow: false },
+};
 
 export default function AuthErrorPage() {
   return (

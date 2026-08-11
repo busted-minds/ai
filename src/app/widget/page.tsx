@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { WidgetChat } from "@/components/widget-chat";
 import {
@@ -9,6 +10,11 @@ import { loadViewer } from "@/lib/auth/viewer";
 
 type WidgetPageProps = {
   searchParams: Promise<{ theme?: string | string[] }>;
+};
+
+export const metadata: Metadata = {
+  title: "Busted Minds AI widget",
+  robots: { index: false, follow: false },
 };
 
 export default async function WidgetPage({ searchParams }: WidgetPageProps) {

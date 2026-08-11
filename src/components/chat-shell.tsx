@@ -49,18 +49,21 @@ const starterPrompts = [
     icon: Lightbulb,
     eyebrow: "Think",
     title: "Untangle a hard idea",
+    description: "Find the simple truth hiding inside the complicated version.",
     prompt: "Explain a difficult concept to me with one sharp analogy and no fluff.",
   },
   {
     icon: Code2,
     eyebrow: "Build",
     title: "Ship better code",
+    description: "Turn a rough technical problem into a production-ready approach.",
     prompt: "Help me design a clean, production-ready approach for the software problem I describe next.",
   },
   {
     icon: Compass,
     eyebrow: "Decide",
     title: "Challenge my plan",
+    description: "Pressure-test the thinking before the real world gets a vote.",
     prompt: "Act as a brutally honest strategist. Stress-test my plan and tell me what I am missing.",
   },
 ];
@@ -505,18 +508,26 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         <div className={messages.length ? "conversation has-messages" : "conversation"}>
           {!messages.length && !historyLoading ? (
             <section className="welcome">
-              <div className="welcome-sigil"><BustedBulbMark size={34} /></div>
-              <p className="eyebrow">Good {shortGreeting()}</p>
-              <h1>What are we <em>breaking open</em> today?</h1>
+              <div className="welcome-heading-row">
+                <div className="welcome-sigil"><BustedBulbMark size={34} /></div>
+                <div>
+                  <p className="eyebrow">Good {shortGreeting()}</p>
+                  <p className="welcome-status">Your thinking room is ready</p>
+                </div>
+              </div>
+              <h1>Busted Minds AI: <em>break open any idea.</em></h1>
               <p className="welcome-copy">
-                Bring the mess. I’ll bring the brains, the nerve, and a frankly unreasonable amount of confidence.
+                Chat with BM AI for sharp answers, clearer thinking, coding help, research, and honest feedback—with
+                a frankly unreasonable amount of confidence.
               </p>
               <div className="starter-grid">
-                {starterPrompts.map(({ icon: Icon, eyebrow, title, prompt }) => (
+                {starterPrompts.map(({ icon: Icon, eyebrow, title, description, prompt }, index) => (
                   <button key={title} type="button" onClick={() => { setInput(prompt); requestAnimationFrame(() => composerRef.current?.focus()); }}>
-                    <span className="starter-icon"><Icon size={18} /></span>
+                    <span className="starter-number">0{index + 1}</span>
+                    <span className="starter-icon"><Icon size={19} /></span>
                     <small>{eyebrow}</small>
                     <strong>{title}</strong>
+                    <p>{description}</p>
                     <ArrowUpRight size={17} />
                   </button>
                 ))}
@@ -599,6 +610,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 disabled={pending || (!viewer.authenticated && remaining === 0)}
               />
               <div className="composer-bottom">
+                <span>Enter to send · Shift + Enter for a new line</span>
                 <button type="submit" disabled={!input.trim() || pending || (!viewer.authenticated && remaining === 0)} aria-label="Send message">
                   <SendHorizontal size={19} />
                 </button>

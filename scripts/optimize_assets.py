@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,9 @@ class Mp4OptimizationResult:
 def target_box(path: Path) -> tuple[int, int]:
     relative = path.relative_to(ROOT).as_posix()
 
+    if relative == "public/brand/bmai-og.png":
+        # Social platforms expect a precise 1.91:1 Open Graph canvas.
+        return (1200, 630)
     if relative in {
         "public/brand/bmai-logo-dark.png",
         "public/brand/bmai-logo-light.png",
@@ -90,7 +93,11 @@ def optimize_png(path: Path) -> OptimizationResult:
         original_dimensions = source.size
         has_alpha = "A" in source.getbands() or "transparency" in source.info
         image = source.convert("RGBA" if has_alpha else "RGB")
-        image.thumbnail(target_box(path), Image.Resampling.LANCZOS)
+        target_dimensions = target_box(path)
+        if path.relative_to(ROOT).as_posix() == "public/brand/bmai-og.png":
+            image = ImageOps.fit(image, target_dimensions, method=Image.Resampling.LANCZOS)
+        else:
+            image.thumbnail(target_dimensions, Image.Resampling.LANCZOS)
         optimized_dimensions = image.size
         icc_profile = source.info.get("icc_profile")
 
