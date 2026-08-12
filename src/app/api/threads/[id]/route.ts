@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadThreadMessages } from "@/lib/chat-data";
+import { CHAT_IMAGE_BUCKET, parseStoredAttachments } from "@/lib/chat-attachments";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -43,8 +44,17 @@ export async function PATCH(request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   const [{ id }, { supabase, user }] = await Promise.all([context.params, authenticatedClient()]);
   if (!user) return NextResponse.json({ message: "Sign in required." }, { status: 401 });
+  const { data: messages } = await supabase
+    .from("chat_messages")
+    .select("attachments")
+    .eq("thread_id", id);
+  const storagePaths = (messages ?? [])
+    .flatMap((message) => parseStoredAttachments(message.attachments))
+    .map(({ storagePath }) => storagePath);
   const { error } = await supabase.from("chat_threads").delete().eq("id", id);
   if (error) return NextResponse.json({ message: "Conversation could not be deleted." }, { status: 400 });
+  if (storagePaths.length) {
+    await supabase.storage.from(CHAT_IMAGE_BUCKET).remove([...new Set(storagePaths)]);
+  }
   return NextResponse.json({ ok: true });
 }
-

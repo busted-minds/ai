@@ -13,7 +13,13 @@ import {
   normalizeChatMode,
   resolveInferenceTier,
 } from "@/lib/ai/modes";
-import { MODEL_POOLS } from "@/lib/ai/model-pools";
+import { MODEL_POOLS, VISION_MODEL_POOLS } from "@/lib/ai/model-pools";
+import {
+  AttachmentValidationError,
+  parseStoredAttachments,
+  validateIncomingAttachments,
+} from "@/lib/chat-attachments";
+import { MAX_IMAGE_ATTACHMENTS } from "@/lib/image-constants";
 
 process.env.ANON_USAGE_SECRET = "test-only-secret-with-enough-entropy";
 
@@ -70,9 +76,65 @@ describe("chat mode routing", () => {
     expect(MODEL_POOLS.fast.map(({ model }) => model)).not.toEqual(MODEL_POOLS.expert.map(({ model }) => model));
   });
 
+  it("routes images only to vision-capable providers", () => {
+    expect(VISION_MODEL_POOLS.fast.length).toBeGreaterThan(1);
+    expect(VISION_MODEL_POOLS.expert.length).toBeGreaterThan(1);
+    expect([...VISION_MODEL_POOLS.fast, ...VISION_MODEL_POOLS.expert])
+      .not.toContainEqual(expect.objectContaining({ provider: "cerebras" }));
+  });
+
   it("lets Auto promote complex prompts to the Expert pool", () => {
     expect(resolveInferenceTier("auto", "What is entropy?")).toBe("fast");
     expect(resolveInferenceTier("auto", "Audit this security architecture and explain the trade-offs.")).toBe("expert");
     expect(resolveInferenceTier("expert", "Hello")).toBe("expert");
+  });
+});
+
+describe("chat image validation", () => {
+  const pngDataUrl = `data:image/png;base64,${Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]).toString("base64")}`;
+
+  it("accepts supported image data and sanitizes its display name", () => {
+    const [attachment] = validateIncomingAttachments([{
+      name: "../screen\u0000shot.png",
+      mimeType: "image/png",
+      dataUrl: pngDataUrl,
+    }]);
+
+    expect(attachment).toMatchObject({
+      name: ".. screen shot.png",
+      mimeType: "image/png",
+      size: 8,
+    });
+    expect(attachment?.bytes.equals(Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]))).toBe(true);
+  });
+
+  it("rejects spoofed image types and too many files", () => {
+    expect(() => validateIncomingAttachments([{
+      name: "spoof.png",
+      mimeType: "image/png",
+      dataUrl: `data:image/png;base64,${Buffer.from("not a png").toString("base64")}`,
+    }])).toThrow(AttachmentValidationError);
+
+    expect(() => validateIncomingAttachments(Array.from(
+      { length: MAX_IMAGE_ATTACHMENTS + 1 },
+      () => ({ name: "image.png", mimeType: "image/png", dataUrl: pngDataUrl }),
+    ))).toThrow(`Attach no more than ${MAX_IMAGE_ATTACHMENTS} images at once.`);
+  });
+
+  it("only accepts canonical private-storage metadata paths", () => {
+    const valid = {
+      id: "ddae8165-42f2-4b2e-a543-f5504e97f07d",
+      name: "diagram.png",
+      mimeType: "image/png",
+      size: 512,
+      storagePath: "d866016b-bde8-4712-901a-3f016f95fca5/044427d1-0e84-4ea3-8104-a6d40f939611/ddae8165-42f2-4b2e-a543-f5504e97f07d.png",
+    };
+
+    expect(parseStoredAttachments([valid])).toEqual([valid]);
+    expect(parseStoredAttachments([{ ...valid, storagePath: `../${valid.storagePath}` }])).toEqual([]);
   });
 });

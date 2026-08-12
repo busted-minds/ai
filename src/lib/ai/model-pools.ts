@@ -87,3 +87,70 @@ export const MODEL_POOLS: Record<InferenceTier, readonly ModelSpec[]> = {
     },
   ],
 };
+
+export const VISION_MODEL_POOLS: Record<InferenceTier, readonly ModelSpec[]> = {
+  fast: [
+    {
+      id: "google-gemini-flash-vision",
+      provider: "google",
+      keyName: "GOOGLE_API_KEY",
+      model: "gemini-3.6-flash",
+    },
+    {
+      id: "groq-qwen-vision",
+      provider: "groq",
+      keyName: "GROQ_API_KEY",
+      model: "qwen/qwen3.6-27b",
+    },
+    {
+      id: "mistral-ministral-vision",
+      provider: "mistral",
+      keyName: "MISTRAL_API_KEY",
+      model: "ministral-8b-2512",
+    },
+    {
+      id: "openrouter-free-vision",
+      provider: "openrouter",
+      keyName: "OPENROUTER_API_KEY",
+      model: "openrouter/free",
+    },
+    {
+      id: "nvidia-nemotron-omni-vision",
+      provider: "nvidia",
+      keyName: "NVIDIA_API_KEY",
+      model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    },
+  ],
+  expert: [
+    {
+      id: "google-gemini-pro-vision",
+      provider: "google",
+      keyName: "GOOGLE_API_KEY",
+      model: "gemini-pro-latest",
+    },
+    {
+      id: "mistral-large-vision",
+      provider: "mistral",
+      keyName: "MISTRAL_API_KEY",
+      model: "mistral-large-latest",
+    },
+    {
+      id: "groq-qwen-vision-expert-fallback",
+      provider: "groq",
+      keyName: "GROQ_API_KEY",
+      model: "qwen/qwen3.6-27b",
+    },
+    {
+      id: "nvidia-nemotron-omni-vision-expert-fallback",
+      provider: "nvidia",
+      keyName: "NVIDIA_API_KEY",
+      model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    },
+    {
+      id: "openrouter-free-vision-expert-fallback",
+      provider: "openrouter",
+      keyName: "OPENROUTER_API_KEY",
+      model: "openrouter/free",
+    },
+  ],
+};

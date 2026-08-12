@@ -17,6 +17,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Paperclip,
   Pencil,
   RefreshCw,
   Search,
@@ -35,12 +36,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrandMark } from "./brand-mark";
 import { BustedBulbMark } from "./busted-bulb-mark";
+import { ImageAttachments } from "./image-attachments";
 import {
   CHAT_MODE_OPTIONS,
   DEFAULT_CHAT_MODE,
   type ChatMode,
 } from "@/lib/ai/modes";
-import type { ChatMessage, ChatThread, Viewer } from "@/lib/types";
+import { attachmentPayload, prepareImageAttachments } from "@/lib/client-images";
+import { MAX_IMAGE_ATTACHMENTS } from "@/lib/image-constants";
+import type { ChatAttachment, ChatMessage, ChatThread, Viewer } from "@/lib/types";
 
 type ChatShellProps = { initialViewer: Viewer };
 type ChatResponse = {
@@ -87,13 +91,31 @@ function safeGuestThreads(): ChatThread[] {
 }
 
 function writeGuestThreads(threads: ChatThread[]) {
-  localStorage.setItem(GUEST_THREADS_KEY, JSON.stringify(threads.slice(0, 20)));
+  const persistable = threads.slice(0, 20).map((thread) => ({
+    ...thread,
+    messages: thread.messages?.map((message) => ({
+      ...message,
+      attachments: message.attachments?.map((attachment) => ({ ...attachment, url: "" })),
+    })),
+  }));
+  localStorage.setItem(GUEST_THREADS_KEY, JSON.stringify(persistable));
 }
 
 function localId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function guestHistoryPayload(messages: ChatMessage[], includeImages: boolean) {
+  const imageMessageIndex = includeImages
+    ? messages.findLastIndex((message) => message.role === "user" && attachmentPayload(message.attachments ?? []).length > 0)
+    : -1;
+  return messages.map(({ role, content, attachments }, index) => ({
+    role,
+    content,
+    ...(index === imageMessageIndex ? { attachments: attachmentPayload(attachments ?? []) } : {}),
+  }));
 }
 
 function shortGreeting() {
@@ -244,6 +266,8 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [imagePreparing, setImagePreparing] = useState(false);
   const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
   const [pending, setPending] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(viewer.authenticated);
@@ -255,6 +279,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editInput, setEditInput] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const updateThreads = useCallback((updater: (current: ChatThread[]) => ChatThread[]) => {
@@ -299,6 +324,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     setCurrentThreadId(null);
     setMessages([]);
     setInput("");
+    setAttachments([]);
     setError("");
     setEditingMessageId(null);
     setEditInput("");
@@ -311,6 +337,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     setSidebarOpen(false);
     setError("");
     setEditingMessageId(null);
+    setAttachments([]);
     if (!viewer.authenticated) {
       setMessages(thread.messages ?? []);
       return;
@@ -343,15 +370,17 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
     replaceFromMessageId,
     regenerateFromMessageId,
     useSearch,
+    imageAttachments = [],
   }: {
     text: string;
     baseMessages: ChatMessage[];
     replaceFromMessageId?: string;
     regenerateFromMessageId?: string;
     useSearch?: boolean;
+    imageAttachments?: ChatAttachment[];
   }) => {
     const trimmedText = text.trim();
-    if ((!trimmedText && !regenerateFromMessageId) || pending) return false;
+    if ((!trimmedText && !imageAttachments.length && !regenerateFromMessageId) || pending) return false;
     if (!viewer.authenticated && remaining === 0) {
       setError("Guest brainpower exhausted. Sign in for unlimited conversations.");
       return false;
@@ -359,7 +388,11 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
 
     const originalMessages = messages;
     const optimisticUserMessage: ChatMessage | null = regenerateFromMessageId ? null : {
-      id: localId(), role: "user", content: trimmedText, createdAt: new Date().toISOString(),
+      id: localId(),
+      role: "user",
+      content: trimmedText,
+      createdAt: new Date().toISOString(),
+      ...(imageAttachments.length ? { attachments: imageAttachments } : {}),
     };
     setMessages([...baseMessages, ...(optimisticUserMessage ? [optimisticUserMessage] : [])]);
     setError("");
@@ -372,7 +405,10 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
         body: JSON.stringify({
           threadId: currentThreadId,
           message: trimmedText || undefined,
-          history: viewer.authenticated ? undefined : baseMessages.map(({ role, content }) => ({ role, content })),
+          attachments: attachmentPayload(imageAttachments),
+          history: viewer.authenticated
+            ? undefined
+            : guestHistoryPayload(baseMessages, imageAttachments.length === 0),
           replaceFromMessageId,
           regenerateFromMessageId,
           useSearch,
@@ -418,11 +454,35 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     const text = input.trim();
-    if (!text || pending) return;
+    const selectedImages = attachments;
+    if ((!text && !selectedImages.length) || pending || imagePreparing) return;
     setInput("");
+    setAttachments([]);
     if (composerRef.current) composerRef.current.style.height = "auto";
-    const sent = await requestAnswer({ text, baseMessages: messages });
-    if (!sent) setInput(text);
+    const sent = await requestAnswer({ text, baseMessages: messages, imageAttachments: selectedImages });
+    if (!sent) {
+      setInput(text);
+      setAttachments(selectedImages);
+    }
+  };
+
+  const chooseImages = async (files: FileList | null) => {
+    if (!files?.length || pending || imagePreparing) return;
+    const selectedFiles = Array.from(files);
+    if (imageInputRef.current) imageInputRef.current.value = "";
+    setImagePreparing(true);
+    setError("");
+    try {
+      const prepared = await prepareImageAttachments(
+        selectedFiles,
+        MAX_IMAGE_ATTACHMENTS - attachments.length,
+      );
+      setAttachments((current) => [...current, ...prepared]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Those images could not be prepared.");
+    } finally {
+      setImagePreparing(false);
+    }
   };
 
   const beginEdit = (message: ChatMessage) => {
@@ -434,11 +494,12 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
 
   const saveEdit = async (message: ChatMessage, index: number) => {
     const text = editInput.trim();
-    if (!text || text === message.content || pending) return;
+    if ((!text && !message.attachments?.length) || text === message.content || pending) return;
     const sent = await requestAnswer({
       text,
       baseMessages: messages.slice(0, index),
       replaceFromMessageId: message.id,
+      imageAttachments: message.attachments ?? [],
     });
     if (sent) {
       setEditingMessageId(null);
@@ -630,6 +691,7 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                   <div className="user-message-content">
                     {editingMessageId === message.id ? (
                       <div className="message-editor">
+                        <ImageAttachments attachments={message.attachments} />
                         <textarea
                           value={editInput}
                           onChange={(event) => setEditInput(event.target.value)}
@@ -638,18 +700,27 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                           aria-label="Edit your message"
                           autoFocus
                         />
-                        <div>
+                        <div className="message-editor-actions">
                           <button type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
-                          <button type="button" onClick={() => void saveEdit(message, index)} disabled={!editInput.trim() || editInput.trim() === message.content || pending}>
+                          <button
+                            type="button"
+                            onClick={() => void saveEdit(message, index)}
+                            disabled={
+                              (!editInput.trim() && !message.attachments?.length)
+                              || editInput.trim() === message.content
+                              || pending
+                            }
+                          >
                             <SendHorizontal size={14} /> Save & resend
                           </button>
                         </div>
                       </div>
                     ) : (
                       <>
-                        <p>{message.content}</p>
+                        <ImageAttachments attachments={message.attachments} />
+                        {message.content && <p>{message.content}</p>}
                         <div className="message-actions user-message-actions">
-                          <CopyMessageAction content={message.content} label="Copy your message" />
+                          {message.content && <CopyMessageAction content={message.content} label="Copy your message" />}
                           <button className="message-action" type="button" onClick={() => beginEdit(message)} disabled={pending} aria-label="Edit and resend message">
                             <Pencil size={14} />
                           </button>
@@ -697,6 +768,19 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
               </div>
             )}
             <form className="composer" onSubmit={(event) => void send(event)}>
+              <ImageAttachments
+                attachments={attachments}
+                onRemove={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))}
+              />
+              <input
+                ref={imageInputRef}
+                className="visually-hidden"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                onChange={(event) => void chooseImages(event.target.files)}
+                tabIndex={-1}
+              />
               <textarea
                 ref={composerRef}
                 rows={1}
@@ -709,8 +793,34 @@ export function ChatShell({ initialViewer }: ChatShellProps) {
                 disabled={pending || (!viewer.authenticated && remaining === 0)}
               />
               <div className="composer-bottom">
+                <button
+                  className="composer-attachment-button"
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={
+                    pending
+                    || imagePreparing
+                    || attachments.length >= MAX_IMAGE_ATTACHMENTS
+                    || (!viewer.authenticated && remaining === 0)
+                  }
+                  aria-label="Attach images"
+                  title="Attach up to 3 images"
+                >
+                  <Paperclip size={17} />
+                </button>
                 <ChatModePicker key={pending ? "mode-busy" : "mode-ready"} mode={mode} onChange={setMode} disabled={pending} />
-                <button type="submit" disabled={!input.trim() || pending || (!viewer.authenticated && remaining === 0)} aria-label="Send message">
+                {imagePreparing && <span className="image-preparing">Optimizing image…</span>}
+                <button
+                  className="composer-send-button"
+                  type="submit"
+                  disabled={
+                    (!input.trim() && !attachments.length)
+                    || pending
+                    || imagePreparing
+                    || (!viewer.authenticated && remaining === 0)
+                  }
+                  aria-label="Send message"
+                >
                   <SendHorizontal size={19} />
                 </button>
               </div>

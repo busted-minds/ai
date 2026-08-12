@@ -1,10 +1,19 @@
 export type ChatRole = "user" | "assistant";
 
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  mimeType: "image/jpeg" | "image/png" | "image/webp";
+  size: number;
+  url: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
   createdAt: string;
+  attachments?: ChatAttachment[];
 };
 
 export type ChatThread = {

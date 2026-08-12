@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatMessage, ChatThread } from "./types";
+import { parseStoredAttachments, storedAttachmentForClient } from "./chat-attachments";
 
 type MessageRow = {
   id: string;
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  attachments?: unknown;
 };
 
 export function makeThreadTitle(message: string): string {
@@ -15,7 +17,15 @@ export function makeThreadTitle(message: string): string {
 }
 
 export function messageFromRow(row: MessageRow): ChatMessage {
-  return { id: row.id, role: row.role, content: row.content, createdAt: row.created_at };
+  const attachments = parseStoredAttachments(row.attachments)
+    .map((attachment) => storedAttachmentForClient(row.id, attachment));
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    createdAt: row.created_at,
+    ...(attachments.length ? { attachments } : {}),
+  };
 }
 
 export async function listThreads(supabase: SupabaseClient): Promise<ChatThread[]> {
@@ -39,11 +49,10 @@ export async function loadThreadMessages(
 ): Promise<ChatMessage[]> {
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id,role,content,created_at")
+    .select("id,role,content,attachments,created_at")
     .eq("thread_id", threadId)
     .order("created_at", { ascending: true })
     .limit(200);
   if (error) throw error;
   return ((data ?? []) as MessageRow[]).map(messageFromRow);
 }
-

@@ -1,6 +1,6 @@
 # Busted Minds AI
 
-A responsive, production-oriented AI chat app with a private six-provider fallback cascade, ten guest messages, unlimited account conversations, durable Supabase threads, and one shared Busted Minds Account.
+A responsive, production-oriented multimodal AI chat app with a private six-provider fallback cascade, image understanding, ten guest messages, unlimited account conversations, durable Supabase threads, and one shared Busted Minds Account.
 
 ## Local development
 
@@ -9,6 +9,8 @@ A responsive, production-oriented AI chat app with a private six-provider fallba
 3. Run `npm run dev` and open `http://localhost:3000`.
 
 All inference keys and Supabase secret keys are read only by server routes. Never add `NEXT_PUBLIC_` to a secret.
+
+The chat and embedded widget accept up to three JPEG, PNG, or WebP images per message. Images are resized in the browser to at most 1600 px and 800 KB each before upload. Account images live in the private `chat-images` Supabase Storage bucket and are fetched through an authenticated route; guest images remain available only for the current browser session.
 
 ## Verification
 
