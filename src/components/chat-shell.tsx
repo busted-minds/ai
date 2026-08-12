@@ -1547,7 +1547,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             data-tooltip="Open sidebar"
           >
             <BrandMark compact priority />
-            <PanelLeftOpen className="sidebar-rail-expand-icon" size={22} aria-hidden />
+            <PanelLeftOpen className="sidebar-rail-expand-icon" size={21} aria-hidden />
           </button>
           <button
             className="sidebar-rail-control"
@@ -1556,7 +1556,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             aria-label="New conversation"
             data-tooltip="New conversation"
           >
-            <SquarePen size={22} />
+            <SquarePen size={21} />
           </button>
           <button
             className="sidebar-rail-control"
@@ -1566,7 +1566,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             aria-controls="conversation-sidebar"
             data-tooltip="Search conversations"
           >
-            <Search size={22} />
+            <Search size={21} />
           </button>
           <button
             className="sidebar-rail-control"
@@ -1576,7 +1576,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             aria-controls="conversation-sidebar"
             data-tooltip="Conversation history"
           >
-            <MessageSquareText size={22} />
+            <MessageSquareText size={21} />
           </button>
           <button
             className="sidebar-rail-control"
@@ -1586,11 +1586,19 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             aria-controls="conversation-sidebar"
             data-tooltip="Projects"
           >
-            <Folder size={22} />
+            <Folder size={21} />
           </button>
         </nav>
 
         <div className="sidebar-rail-footer">
+          <Link
+            href="/settings"
+            className="sidebar-rail-control"
+            aria-label="Settings"
+            data-tooltip="Settings"
+          >
+            <Settings size={19} />
+          </Link>
           {viewer.authenticated ? (
             <button
               className="sidebar-rail-control sidebar-rail-account"
@@ -1600,7 +1608,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
               aria-controls="conversation-sidebar"
               data-tooltip={displayName}
             >
-              <UserRound size={20} />
+              <span className="sidebar-rail-avatar" aria-hidden>{displayName.charAt(0).toUpperCase()}</span>
             </button>
           ) : (
             <Link
