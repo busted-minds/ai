@@ -45,6 +45,7 @@ type ChatRequest = {
   history?: unknown;
   replaceFromMessageId?: unknown;
   regenerateFromMessageId?: unknown;
+  regenerateInstruction?: unknown;
   useSearch?: unknown;
   mode?: unknown;
   privateChat?: unknown;
@@ -255,13 +256,19 @@ export async function POST(request: Request) {
   const regenerateFromMessageId = typeof body?.regenerateFromMessageId === "string"
     ? body.regenerateFromMessageId
     : null;
+  const regenerateInstruction = typeof body?.regenerateInstruction === "string"
+    ? body.regenerateInstruction.trim()
+    : "";
   const useSearch = body?.useSearch === true;
   const privateChat = body?.privateChat === true;
   const mode = normalizeChatMode(body?.mode);
   if (replaceFromMessageId && regenerateFromMessageId) {
     return NextResponse.json({ message: "Choose either edit or regenerate." }, { status: 400 });
   }
-  if (message.length > 12_000) {
+  if (regenerateInstruction && !regenerateFromMessageId) {
+    return NextResponse.json({ message: "Response changes can only be used while regenerating." }, { status: 400 });
+  }
+  if (message.length > 12_000 || regenerateInstruction.length > 12_000) {
     return NextResponse.json(
       { message: "Messages must be under 12,000 characters." },
       { status: 400 },
@@ -411,7 +418,13 @@ export async function POST(request: Request) {
   let answer: string;
   try {
     const inferenceHistory = regenerateFromMessageId
-      ? history
+      ? [
+          ...history,
+          ...(regenerateInstruction ? [{
+            role: "user" as const,
+            content: `Answer the prior request again, incorporating this requested change:\n\n${regenerateInstruction}`,
+          }] : []),
+        ]
       : [...history, {
           role: "user" as const,
           content: message,

@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
+  BrainCircuit,
   Check,
+  ChevronDown,
   Copy,
   ExternalLink,
   Lightbulb,
@@ -15,6 +17,7 @@ import {
   SendHorizontal,
   Sparkles,
   X,
+  Zap,
 } from "lucide-react";
 import {
   useEffect,
@@ -32,6 +35,12 @@ import {
   removePendingDocumentAttachments,
 } from "@/lib/client-attachments";
 import { CHAT_ATTACHMENT_ACCEPT, MAX_CHAT_ATTACHMENTS } from "@/lib/attachment-constants";
+import {
+  CHAT_MODE_OPTIONS,
+  DEFAULT_CHAT_MODE,
+  normalizeChatMode,
+  type ChatMode,
+} from "@/lib/ai/modes";
 import type { ChatAttachment, ChatMessage, Viewer } from "@/lib/types";
 import { readJsonResponse } from "@/lib/client-response";
 
@@ -50,6 +59,7 @@ type ChatResponse = {
 };
 
 const WIDGET_GUEST_MESSAGES_KEY = "bmai-widget-messages-v1";
+const WIDGET_CHAT_MODE_KEY = "bmai-widget-response-mode-v1";
 
 const quickStarts = [
   {
@@ -128,6 +138,87 @@ function CopyAnswer({ content }: { content: string }) {
   );
 }
 
+function WidgetModeIcon({ mode }: { mode: ChatMode }) {
+  if (mode === "expert") return <BrainCircuit size={14} />;
+  if (mode === "auto") return <Sparkles size={14} />;
+  return <Zap size={14} />;
+}
+
+function WidgetModePicker({
+  mode,
+  onChange,
+  disabled,
+}: {
+  mode: ChatMode;
+  onChange: (mode: ChatMode) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const selectedMode = CHAT_MODE_OPTIONS.find((option) => option.value === mode) ?? CHAT_MODE_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="widget-mode-picker" ref={pickerRef}>
+      <button
+        className={`widget-mode-trigger widget-mode-trigger-${mode}`}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        disabled={disabled}
+        aria-label={`Response mode: ${selectedMode.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Response mode: ${selectedMode.label}`}
+      >
+        <WidgetModeIcon mode={mode} />
+        <span>{selectedMode.label}</span>
+        <ChevronDown className="widget-mode-trigger-chevron" size={13} />
+      </button>
+      {open && (
+        <div className="widget-mode-menu" role="menu" aria-label="AI response mode">
+          {CHAT_MODE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              className={option.value === mode ? "widget-mode-option is-selected" : "widget-mode-option"}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option.value === mode}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span className={`widget-mode-option-icon widget-mode-option-icon-${option.value}`}>
+                <WidgetModeIcon mode={option.value} />
+              </span>
+              <span className="widget-mode-option-copy">
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              {option.value === mode && <Check size={15} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -139,6 +230,8 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   const [remaining, setRemaining] = useState(initialRemaining);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
+  const [modeHydrated, setModeHydrated] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -156,6 +249,25 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     if (initialViewer.authenticated || !guestHydrated) return;
     localStorage.setItem(WIDGET_GUEST_MESSAGES_KEY, JSON.stringify(persistableMessages(messages)));
   }, [guestHydrated, initialViewer.authenticated, messages]);
+
+  useEffect(() => {
+    try {
+      setMode(normalizeChatMode(localStorage.getItem(WIDGET_CHAT_MODE_KEY)));
+    } catch {
+      // Storage access can be unavailable in embedded, privacy-restricted contexts.
+    } finally {
+      setModeHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!modeHydrated) return;
+    try {
+      localStorage.setItem(WIDGET_CHAT_MODE_KEY, mode);
+    } catch {
+      // The selected mode remains available for this session when storage is unavailable.
+    }
+  }, [mode, modeHydrated]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -213,6 +325,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
           threadId,
           message: text || undefined,
           attachments: attachmentPayload(selectedAttachments),
+          mode,
           history: initialViewer.authenticated
             ? undefined
             : guestHistoryPayload(
@@ -290,6 +403,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             : guestHistoryPayload(baseMessages),
           regenerateFromMessageId: message.id,
           useSearch: true,
+          mode,
         }),
       });
       const payload = await readJsonResponse<ChatResponse & { message?: ChatMessage | string }>(response);
@@ -415,8 +529,8 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
                   type="button"
                   onClick={() => void regenerateWithSearch(message, index)}
                   disabled={pending}
-                  aria-label="Regenerate answer with DuckDuckGo search"
-                  title="Regenerate with DuckDuckGo search"
+                  aria-label="Search the web"
+                  title="Search the web"
                 >
                   <Globe size={13} />
                   <span>Search</span>
@@ -464,16 +578,6 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             onChange={(event) => void chooseAttachments(event.target.files)}
             tabIndex={-1}
           />
-          <button
-            className="widget-attachment-button"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={pending || attachmentPreparing || guestBlocked || attachments.length >= MAX_CHAT_ATTACHMENTS}
-            aria-label="Attach files"
-            title={initialViewer.authenticated ? "Attach up to 3 images or documents" : "Attach up to 3 images; sign in for documents"}
-          >
-            <Paperclip size={15} />
-          </button>
           <textarea
             ref={textareaRef}
             rows={1}
@@ -485,14 +589,31 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             aria-label="Message Busted Minds AI"
             disabled={pending || guestBlocked}
           />
-          <button
-            className="widget-send-button"
-            type="submit"
-            disabled={(!input.trim() && !attachments.length) || pending || attachmentPreparing || guestBlocked}
-            aria-label="Send message"
-          >
-            <SendHorizontal size={17} />
-          </button>
+          <div className="widget-composer-bottom">
+            <button
+              className="widget-attachment-button"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={pending || attachmentPreparing || guestBlocked || attachments.length >= MAX_CHAT_ATTACHMENTS}
+              aria-label="Attach files"
+              title={initialViewer.authenticated ? "Attach up to 3 images or documents" : "Attach up to 3 images; sign in for documents"}
+            >
+              <Paperclip size={15} />
+            </button>
+            <WidgetModePicker
+              mode={mode}
+              onChange={setMode}
+              disabled={pending || attachmentPreparing || guestBlocked}
+            />
+            <button
+              className="widget-send-button"
+              type="submit"
+              disabled={(!input.trim() && !attachments.length) || pending || attachmentPreparing || guestBlocked}
+              aria-label="Send message"
+            >
+              <SendHorizontal size={17} />
+            </button>
+          </div>
         </form>
         {!messages.length && <p>Busted Minds AI cannot make mistakes.</p>}
       </footer>

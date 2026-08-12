@@ -276,15 +276,151 @@ function ChatModePicker({
   );
 }
 
+function RegenerateMenu({
+  disabled,
+  mode,
+  onRegenerate,
+}: {
+  disabled: boolean;
+  mode: ChatMode;
+  onRegenerate: (instruction?: string, responseMode?: ChatMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [menuPosition, setMenuPosition] = useState({ left: 0, bottom: 0 });
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selectedMode = CHAT_MODE_OPTIONS.find((option) => option.value === mode) ?? CHAT_MODE_OPTIONS[0];
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = Math.min(342, window.innerWidth - 30);
+    setMenuPosition({
+      left: Math.max(15, Math.min(rect.left - 42, window.innerWidth - menuWidth - 15)),
+      bottom: Math.max(15, window.innerHeight - rect.top + 10),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    updateMenuPosition();
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
+
+  const run = (nextInstruction?: string, responseMode?: ChatMode) => {
+    setInstruction("");
+    setOpen(false);
+    onRegenerate(nextInstruction, responseMode);
+  };
+
+  return (
+    <div className="regenerate-menu-wrap">
+      <button
+        ref={triggerRef}
+        className="message-action regenerate-trigger"
+        type="button"
+        onClick={() => {
+          if (!open) updateMenuPosition();
+          setOpen((current) => !current);
+        }}
+        disabled={disabled}
+        aria-label="Regenerate answer"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Regenerate answer"
+      >
+        <RefreshCw size={15} />
+      </button>
+      {open && createPortal(
+        <div
+          className="regenerate-menu"
+          ref={menuRef}
+          role="dialog"
+          aria-label="Regenerate answer options"
+          style={menuPosition}
+        >
+          <form
+            className="regenerate-instruction-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const nextInstruction = instruction.trim();
+              if (nextInstruction) run(nextInstruction);
+            }}
+          >
+            <textarea
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                if (window.matchMedia("(max-width: 640px), (pointer: coarse)").matches) return;
+                const nextInstruction = instruction.trim();
+                if (!nextInstruction) return;
+                event.preventDefault();
+                run(nextInstruction);
+              }}
+              placeholder="Ask to change this response"
+              aria-label="Ask to change this response"
+              maxLength={12_000}
+              rows={1}
+              autoFocus
+            />
+            <button type="submit" disabled={!instruction.trim()} aria-label="Regenerate with requested changes">
+              <SendHorizontal size={15} />
+            </button>
+          </form>
+          <div className="regenerate-menu-divider" role="separator" />
+          <button className="regenerate-menu-option" type="button" onClick={() => run()}>
+            <RefreshCw size={18} />
+            <span>
+              <strong>Try again</strong>
+              <small>{selectedMode.label} mode</small>
+            </span>
+          </button>
+          {mode !== "expert" && (
+            <button className="regenerate-menu-option" type="button" onClick={() => run(undefined, "expert")}>
+              <BrainCircuit size={19} />
+              <span>
+                <strong>Use Expert mode</strong>
+                <small>Take more time for a stronger answer</small>
+              </span>
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 function MarkdownMessage({
   content,
   disabled,
+  mode,
   onRegenerate,
   onRegenerateWithSearch,
 }: {
   content: string;
   disabled: boolean;
-  onRegenerate: () => void;
+  mode: ChatMode;
+  onRegenerate: (instruction?: string, responseMode?: ChatMode) => void;
   onRegenerateWithSearch: () => void;
 }) {
   return (
@@ -294,16 +430,14 @@ function MarkdownMessage({
       </div>
       <div className="message-actions">
         <CopyMessageAction content={content} label="Copy answer" />
-        <button className="message-action" type="button" onClick={onRegenerate} disabled={disabled} aria-label="Regenerate answer">
-          <RefreshCw size={15} />
-        </button>
+        <RegenerateMenu disabled={disabled} mode={mode} onRegenerate={onRegenerate} />
         <button
           className="message-action search-answer-action"
           type="button"
           onClick={onRegenerateWithSearch}
           disabled={disabled}
-          aria-label="Regenerate answer with DuckDuckGo search"
-          title="Regenerate with DuckDuckGo search"
+          aria-label="Search the web"
+          title="Search the web"
         >
           <Globe size={15} />
         </button>
@@ -927,6 +1061,8 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     baseMessages,
     replaceFromMessageId,
     regenerateFromMessageId,
+    regenerateInstruction,
+    responseMode,
     useSearch,
     messageAttachments = [],
   }: {
@@ -934,6 +1070,8 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     baseMessages: ChatMessage[];
     replaceFromMessageId?: string;
     regenerateFromMessageId?: string;
+    regenerateInstruction?: string;
+    responseMode?: ChatMode;
     useSearch?: boolean;
     messageAttachments?: ChatAttachment[];
   }) => {
@@ -970,8 +1108,9 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             : undefined,
           replaceFromMessageId,
           regenerateFromMessageId,
+          regenerateInstruction,
           useSearch,
-          mode,
+          mode: responseMode ?? mode,
           privateChat: isPrivateChat,
         }),
       });
@@ -1077,13 +1216,21 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     }
   };
 
-  const regenerate = async (message: ChatMessage, index: number) => {
+  const regenerate = async (
+    message: ChatMessage,
+    index: number,
+    regenerateInstruction?: string,
+    responseMode: ChatMode = mode,
+  ) => {
     if (pending) return;
     setEditingMessageId(null);
+    if (responseMode !== mode) setMode(responseMode);
     await requestAnswer({
       text: "",
       baseMessages: messages.slice(0, index),
       regenerateFromMessageId: message.id,
+      regenerateInstruction,
+      responseMode,
     });
   };
 
@@ -1773,7 +1920,8 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                     <MarkdownMessage
                       content={message.content}
                       disabled={pending}
-                      onRegenerate={() => void regenerate(message, index)}
+                      mode={mode}
+                      onRegenerate={(instruction, responseMode) => void regenerate(message, index, instruction, responseMode)}
                       onRegenerateWithSearch={() => void regenerateWithSearch(message, index)}
                     />
                   </div>
