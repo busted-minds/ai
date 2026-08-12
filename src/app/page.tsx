@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { ChatShell } from "@/components/chat-shell";
 import { loadViewer } from "@/lib/auth/viewer";
+import { loadThreadMessages } from "@/lib/chat-data";
+import { isUuid } from "@/lib/chat-projects";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { ChatThread } from "@/lib/types";
 
 const siteUrl = "https://ai.bustedminds.us.kg/";
 const siteTitle = "Busted Minds AI — AI Chat & Thought Partner";
@@ -47,15 +51,40 @@ const structuredData = {
   ],
 };
 
-export default async function HomePage() {
-  const viewer = await loadViewer();
+type HomePageProps = { searchParams: Promise<{ thread?: string | string[] }> };
+
+export default async function HomePage({ searchParams }: HomePageProps) {
+  const [viewer, query] = await Promise.all([loadViewer(), searchParams]);
+  const requestedThreadId = typeof query.thread === "string" ? query.thread : null;
+  let initialThread: ChatThread | null = null;
+  if (viewer.authenticated && requestedThreadId && isUuid(requestedThreadId)) {
+    const supabase = await createSupabaseServerClient();
+    const { data: thread } = await supabase
+      .from("chat_threads")
+      .select("id,title,project_id,updated_at")
+      .eq("id", requestedThreadId)
+      .maybeSingle();
+    if (thread) {
+      try {
+        initialThread = {
+          id: thread.id,
+          title: thread.title,
+          projectId: thread.project_id,
+          updatedAt: thread.updated_at,
+          messages: await loadThreadMessages(supabase, thread.id),
+        };
+      } catch {
+        initialThread = null;
+      }
+    }
+  }
   return (
     <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
-      <ChatShell initialViewer={viewer} />
+      <ChatShell initialViewer={viewer} initialThread={initialThread} />
     </>
   );
 }

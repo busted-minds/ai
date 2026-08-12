@@ -26,9 +26,14 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ImageAttachments } from "./image-attachments";
-import { attachmentPayload, prepareImageAttachments } from "@/lib/client-images";
-import { MAX_IMAGE_ATTACHMENTS } from "@/lib/image-constants";
+import {
+  attachmentPayload,
+  prepareChatAttachments,
+  removePendingDocumentAttachments,
+} from "@/lib/client-attachments";
+import { CHAT_ATTACHMENT_ACCEPT, MAX_CHAT_ATTACHMENTS } from "@/lib/attachment-constants";
 import type { ChatAttachment, ChatMessage, Viewer } from "@/lib/types";
+import { readJsonResponse } from "@/lib/client-response";
 
 type WidgetChatProps = {
   initialViewer: Viewer;
@@ -130,12 +135,12 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   const [threadId, setThreadId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [imagePreparing, setImagePreparing] = useState(false);
+  const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const [remaining, setRemaining] = useState(initialRemaining);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -178,8 +183,8 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     const text = input.trim();
-    const selectedImages = attachments;
-    if ((!text && !selectedImages.length) || pending || imagePreparing) return;
+    const selectedAttachments = attachments;
+    if ((!text && !selectedAttachments.length) || pending || attachmentPreparing) return;
     if (!initialViewer.authenticated && remaining === 0) {
       setError("Your 10 guest messages are used. Sign in to keep going.");
       return;
@@ -191,7 +196,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
       role: "user",
       content: text,
       createdAt: new Date().toISOString(),
-      ...(selectedImages.length ? { attachments: selectedImages } : {}),
+      ...(selectedAttachments.length ? { attachments: selectedAttachments } : {}),
     };
     setMessages([...baseMessages, optimisticMessage]);
     setInput("");
@@ -207,18 +212,18 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
         body: JSON.stringify({
           threadId,
           message: text || undefined,
-          attachments: attachmentPayload(selectedImages),
+          attachments: attachmentPayload(selectedAttachments),
           history: initialViewer.authenticated
             ? undefined
             : guestHistoryPayload(
                 baseMessages.slice(-23).map((message) => ({
                   ...message,
-                  attachments: selectedImages.length ? undefined : message.attachments,
+                  attachments: selectedAttachments.length ? undefined : message.attachments,
                 })),
               ),
         }),
       });
-      const payload = (await response.json()) as ChatResponse & { message?: ChatMessage | string };
+      const payload = await readJsonResponse<ChatResponse & { message?: ChatMessage | string }>(response);
       if (!response.ok || !payload.message || typeof payload.message === "string") {
         if (response.status === 429) setRemaining(0);
         throw new Error(typeof payload.message === "string" ? payload.message : "No answer arrived.");
@@ -231,7 +236,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     } catch (caught) {
       setMessages(baseMessages);
       setInput(text);
-      setAttachments(selectedImages);
+      setAttachments(selectedAttachments);
       setError(caught instanceof Error ? caught.message : "Something broke. Try that again.");
     } finally {
       setPending(false);
@@ -239,23 +244,26 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     }
   };
 
-  const chooseImages = async (files: FileList | null) => {
-    if (!files?.length || pending || imagePreparing) return;
+  const chooseAttachments = async (files: FileList | null) => {
+    if (!files?.length || pending || attachmentPreparing) return;
     const selectedFiles = Array.from(files);
-    if (imageInputRef.current) imageInputRef.current.value = "";
-    setImagePreparing(true);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setAttachmentPreparing(true);
     setError("");
     try {
-      const prepared = await prepareImageAttachments(
-        selectedFiles,
-        MAX_IMAGE_ATTACHMENTS - attachments.length,
-      );
+      const prepared = await prepareChatAttachments(selectedFiles, attachments, initialViewer.id);
       setAttachments((current) => [...current, ...prepared]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Those images could not be prepared.");
+      setError(caught instanceof Error ? caught.message : "Those files could not be prepared.");
     } finally {
-      setImagePreparing(false);
+      setAttachmentPreparing(false);
     }
+  };
+
+  const removeAttachment = async (id: string) => {
+    const attachment = attachments.find((candidate) => candidate.id === id);
+    setAttachments((current) => current.filter((candidate) => candidate.id !== id));
+    if (attachment) await removePendingDocumentAttachments([attachment]);
   };
 
   const regenerateWithSearch = async (message: ChatMessage, index: number) => {
@@ -284,7 +292,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
           useSearch: true,
         }),
       });
-      const payload = (await response.json()) as ChatResponse & { message?: ChatMessage | string };
+      const payload = await readJsonResponse<ChatResponse & { message?: ChatMessage | string }>(response);
       if (!response.ok || !payload.message || typeof payload.message === "string") {
         if (response.status === 429) setRemaining(0);
         throw new Error(typeof payload.message === "string" ? payload.message : "No answer arrived.");
@@ -322,6 +330,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   };
 
   const closeWidget = () => {
+    void removePendingDocumentAttachments(attachments);
     if (window.parent !== window) {
       window.parent.postMessage({ type: "bmai:close" }, "*");
     }
@@ -443,25 +452,25 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
         <ImageAttachments
           attachments={attachments}
           compact
-          onRemove={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))}
+          onRemove={(id) => void removeAttachment(id)}
         />
         <form className="widget-composer" onSubmit={(event) => void send(event)}>
           <input
-            ref={imageInputRef}
+            ref={fileInputRef}
             className="visually-hidden"
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept={CHAT_ATTACHMENT_ACCEPT}
             multiple
-            onChange={(event) => void chooseImages(event.target.files)}
+            onChange={(event) => void chooseAttachments(event.target.files)}
             tabIndex={-1}
           />
           <button
             className="widget-attachment-button"
             type="button"
-            onClick={() => imageInputRef.current?.click()}
-            disabled={pending || imagePreparing || guestBlocked || attachments.length >= MAX_IMAGE_ATTACHMENTS}
-            aria-label="Attach images"
-            title="Attach up to 3 images"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={pending || attachmentPreparing || guestBlocked || attachments.length >= MAX_CHAT_ATTACHMENTS}
+            aria-label="Attach files"
+            title={initialViewer.authenticated ? "Attach up to 3 images or documents" : "Attach up to 3 images; sign in for documents"}
           >
             <Paperclip size={15} />
           </button>
@@ -479,7 +488,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
           <button
             className="widget-send-button"
             type="submit"
-            disabled={(!input.trim() && !attachments.length) || pending || imagePreparing || guestBlocked}
+            disabled={(!input.trim() && !attachments.length) || pending || attachmentPreparing || guestBlocked}
             aria-label="Send message"
           >
             <SendHorizontal size={17} />

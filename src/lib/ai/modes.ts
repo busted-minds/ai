@@ -12,7 +12,7 @@ export const CHAT_MODE_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "fast", label: "Fast", description: "Quick answers with low latency" },
   { value: "auto", label: "Auto", description: "Balances speed and depth" },
-  { value: "expert", label: "Expert", description: "Stronger models for hard problems" },
+  { value: "expert", label: "Expert", description: "Stronger model for hard problems" },
 ];
 
 const EXPERT_PROMPT_PATTERN = /\b(?:analy[sz]e|architecture|audit|debug|derive|diagnose|evaluate|expert|proof|reason(?:ing)?|refactor|research|security|strategy|trade-?offs?)\b/i;

@@ -1,11 +1,14 @@
+import type { SupportedAttachmentMimeType } from "./attachment-constants";
+
 export type ChatRole = "user" | "assistant";
 
 export type ChatAttachment = {
   id: string;
   name: string;
-  mimeType: "image/jpeg" | "image/png" | "image/webp";
+  mimeType: SupportedAttachmentMimeType;
   size: number;
   url: string;
+  storagePath?: string;
 };
 
 export type ChatMessage = {
@@ -19,8 +22,17 @@ export type ChatMessage = {
 export type ChatThread = {
   id: string;
   title: string;
+  projectId: string | null;
+  archived?: boolean;
   updatedAt: string;
   messages?: ChatMessage[];
+};
+
+export type ChatProject = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Viewer = {

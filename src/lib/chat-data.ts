@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ChatMessage, ChatThread } from "./types";
+import type { ChatMessage, ChatProject, ChatThread } from "./types";
 import { parseStoredAttachments, storedAttachmentForClient } from "./chat-attachments";
 
 type MessageRow = {
@@ -31,7 +31,7 @@ export function messageFromRow(row: MessageRow): ChatMessage {
 export async function listThreads(supabase: SupabaseClient): Promise<ChatThread[]> {
   const { data, error } = await supabase
     .from("chat_threads")
-    .select("id,title,updated_at")
+    .select("id,title,project_id,updated_at")
     .eq("archived", false)
     .order("updated_at", { ascending: false })
     .limit(100);
@@ -39,6 +39,22 @@ export async function listThreads(supabase: SupabaseClient): Promise<ChatThread[
   return (data ?? []).map((row) => ({
     id: row.id as string,
     title: row.title as string,
+    projectId: row.project_id as string | null,
+    updatedAt: row.updated_at as string,
+  }));
+}
+
+export async function listProjects(supabase: SupabaseClient): Promise<ChatProject[]> {
+  const { data, error } = await supabase
+    .from("chat_projects")
+    .select("id,name,created_at,updated_at")
+    .order("created_at", { ascending: true })
+    .limit(100);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    name: row.name as string,
+    createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   }));
 }

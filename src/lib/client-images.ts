@@ -128,26 +128,3 @@ export async function prepareImageAttachments(files: File[], availableSlots = MA
   for (const file of files) prepared.push(await prepareImageAttachment(file));
   return prepared;
 }
-
-export function attachmentPayload(attachments: ChatAttachment[]) {
-  if (!Array.isArray(attachments)) return [];
-  return (attachments as unknown[]).slice(0, MAX_IMAGE_ATTACHMENTS).flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const attachment = item as Partial<ChatAttachment>;
-    if (
-      typeof attachment.name !== "string"
-      || !isSupportedImageMimeType(attachment.mimeType)
-      || typeof attachment.size !== "number"
-      || typeof attachment.url !== "string"
-      || !attachment.url.startsWith(`data:${attachment.mimeType};base64,`)
-    ) {
-      return [];
-    }
-    return [{
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      size: attachment.size,
-      dataUrl: attachment.url,
-    }];
-  });
-}

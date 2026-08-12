@@ -10,7 +10,11 @@ A responsive, production-oriented multimodal AI chat app with a private six-prov
 
 All inference keys and Supabase secret keys are read only by server routes. Never add `NEXT_PUBLIC_` to a secret.
 
-The chat and embedded widget accept up to three JPEG, PNG, or WebP images per message. Images are resized in the browser to at most 1600 px and 800 KB each before upload. Account images live in the private `chat-images` Supabase Storage bucket and are fetched through an authenticated route; guest images remain available only for the current browser session.
+Inference uses an adaptive, zero-cost six-provider registry. Authenticated provider catalogs are refreshed every 15 minutes, filtered to free text/vision chat models, and routed by capability, quality, latency, recent health, and observed quota. Slow requests are hedged across different providers, while provider/model cooldowns prevent repeated calls to exhausted or incompatible endpoints. Set `AI_MODEL_CATALOG_TTL_MS` to change the refresh interval.
+
+For a protected operational snapshot, set a long random `AI_HEALTH_TOKEN` and request `GET /api/ai/health` with `Authorization: Bearer <token>`. Add `?refresh=1` to force an authenticated catalog refresh. The endpoint is disabled with a 404 when the token is unset and never returns API keys, prompts, or responses.
+
+The chat and embedded widget accept up to three JPEG, PNG, WebP, PDF, DOCX, TXT, Markdown, CSV, or JSON files per message. Images are resized in the browser to at most 1600 px and 800 KB each before upload. Signed-in users upload documents directly to the private `chat-files` Supabase Storage bucket, bypassing the Vercel Function request-body limit; documents are limited to 8 MB each and 16 MB combined. Extracted text is bounded and saved with the message so later turns can reuse it. Guests can attach images, while document uploads require a Busted Minds Account. Private files are fetched through an authenticated route.
 
 ## Verification
 

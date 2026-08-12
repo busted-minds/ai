@@ -13,13 +13,32 @@ import {
   normalizeChatMode,
   resolveInferenceTier,
 } from "@/lib/ai/modes";
-import { MODEL_POOLS, VISION_MODEL_POOLS } from "@/lib/ai/model-pools";
+import {
+  FALLBACK_MODELS,
+  MODEL_POOLS,
+  VISION_MODEL_POOLS,
+  defineModel,
+} from "@/lib/ai/model-pools";
+import { parseProviderCatalog } from "@/lib/ai/model-registry";
+import { InferenceTracker, quotaFromHeaders } from "@/lib/ai/inference-state";
 import {
   AttachmentValidationError,
   parseStoredAttachments,
+  validateIncomingChatAttachments,
   validateIncomingAttachments,
 } from "@/lib/chat-attachments";
 import { MAX_IMAGE_ATTACHMENTS } from "@/lib/image-constants";
+import {
+  attachmentActionUrl,
+  pendingDocumentAttachmentUrl,
+  safeChatAttachmentUrl,
+} from "@/lib/attachment-urls";
+import {
+  MAX_CUSTOM_INSTRUCTIONS_LENGTH,
+  normalizeCustomInstructions,
+  parseChatPreferences,
+} from "@/lib/chat-preferences";
+import { isUuid, MAX_CHAT_PROJECT_NAME_LENGTH, normalizeProjectName } from "@/lib/chat-projects";
 
 process.env.ANON_USAGE_SECRET = "test-only-secret-with-enough-entropy";
 
@@ -50,6 +69,19 @@ describe("thread titles", () => {
   });
 });
 
+describe("chat projects", () => {
+  it("normalizes project names and enforces the database length", () => {
+    expect(normalizeProjectName("  Product   launch  ")).toBe("Product launch");
+    expect(normalizeProjectName("x".repeat(100))).toHaveLength(MAX_CHAT_PROJECT_NAME_LENGTH);
+    expect(normalizeProjectName(null)).toBe("");
+  });
+
+  it("only accepts canonical UUID project identifiers", () => {
+    expect(isUuid("044427d1-0e84-4ea3-8104-a6d40f939611")).toBe(true);
+    expect(isUuid("not-a-project-id")).toBe(false);
+  });
+});
+
 describe("DuckDuckGo search routing", () => {
   it("recognizes requests that need fresh or explicitly searched information", () => {
     expect(shouldUseDuckDuckGo("What is the latest Node.js version?")).toBe(true);
@@ -71,9 +103,10 @@ describe("chat mode routing", () => {
   });
 
   it("uses separate Fast and Expert model pools", () => {
-    expect(MODEL_POOLS.fast[0]?.model).toBe("openai/gpt-oss-20b");
-    expect(MODEL_POOLS.expert[0]?.model).toBe("nvidia/nemotron-3-ultra-550b-a55b:free");
+    expect(MODEL_POOLS.fast.every(({ free }) => free)).toBe(true);
+    expect(MODEL_POOLS.expert.every(({ free }) => free)).toBe(true);
     expect(MODEL_POOLS.fast.map(({ model }) => model)).not.toEqual(MODEL_POOLS.expert.map(({ model }) => model));
+    expect(new Set(FALLBACK_MODELS.map(({ provider }) => provider)).size).toBe(6);
   });
 
   it("routes images only to vision-capable providers", () => {
@@ -87,6 +120,176 @@ describe("chat mode routing", () => {
     expect(resolveInferenceTier("auto", "What is entropy?")).toBe("fast");
     expect(resolveInferenceTier("auto", "Audit this security architecture and explain the trade-offs.")).toBe("expert");
     expect(resolveInferenceTier("expert", "Hello")).toBe("expert");
+  });
+});
+
+describe("chat preferences", () => {
+  it("normalizes device preferences and falls back safely", () => {
+    expect(parseChatPreferences(JSON.stringify({
+      defaultMode: "expert",
+      customInstructions: "  Keep it concise.  ",
+      enterToSend: false,
+    }))).toEqual({
+      defaultMode: "expert",
+      enterToSend: false,
+    });
+    expect(parseChatPreferences("not-json").defaultMode).toBe("fast");
+  });
+
+  it("caps custom instructions sent to inference", () => {
+    expect(normalizeCustomInstructions(`  ${"x".repeat(MAX_CUSTOM_INSTRUCTIONS_LENGTH + 20)}  `))
+      .toHaveLength(MAX_CUSTOM_INSTRUCTIONS_LENGTH);
+  });
+});
+
+describe("free model registry", () => {
+  it("admits Google free chat models and rejects paid or non-chat entries", () => {
+    const models = parseProviderCatalog("google", {
+      models: [
+        { name: "models/gemini-3.6-flash", supportedGenerationMethods: ["generateContent"], inputTokenLimit: 1_000_000 },
+        { name: "models/gemini-2.5-pro", supportedGenerationMethods: ["generateContent"] },
+        { name: "models/gemini-pro-latest", supportedGenerationMethods: ["generateContent"] },
+        { name: "models/gemini-2.5-flash-preview-tts", supportedGenerationMethods: ["generateContent"] },
+        { name: "models/gemini-3.5-flash", supportedGenerationMethods: ["countTokens"] },
+      ],
+    });
+
+    expect(models.map(({ model }) => model)).toEqual(["gemini-3.6-flash", "gemini-2.5-pro"]);
+    expect(models[0]).toMatchObject({ free: true, vision: true, contextWindow: 1_000_000 });
+  });
+
+  it("only admits zero-price OpenRouter text models and preserves vision metadata", () => {
+    const freePricing = { prompt: "0", completion: "0", request: "0" };
+    const models = parseProviderCatalog("openrouter", {
+      data: [
+        {
+          id: "openrouter/free",
+          pricing: freePricing,
+          context_length: 200_000,
+          architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+        },
+        {
+          id: "vendor/paid-model",
+          pricing: { prompt: "0.0001", completion: "0", request: "0" },
+          architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+        },
+        {
+          id: "vendor/image-generator:free",
+          pricing: freePricing,
+          architecture: { input_modalities: ["text"], output_modalities: ["image"] },
+        },
+        {
+          id: "vendor/content-safeguard:free",
+          pricing: freePricing,
+          architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+        },
+      ],
+    });
+
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({ model: "openrouter/free", vision: true, source: "router" });
+  });
+
+  it("uses provider capability and retirement metadata", () => {
+    const mistral = parseProviderCatalog("mistral", {
+      data: [
+        { id: "mistral-large-latest", capabilities: { completion_chat: true, vision: true }, deprecation: null },
+        { id: "mistral-old", capabilities: { completion_chat: true, vision: false }, deprecation: "2026-08-31" },
+        { id: "mistral-embed", capabilities: { completion_chat: false, vision: false }, deprecation: null },
+      ],
+    });
+    const groq = parseProviderCatalog("groq", {
+      data: [
+        { id: "qwen/qwen3.6-27b", active: true, input_modalities: ["text", "image"], output_modalities: ["text"] },
+        { id: "llama-3.3-70b-versatile", active: true, input_modalities: ["text"], output_modalities: ["text"] },
+      ],
+    }, Date.parse("2026-08-12T00:00:00Z"));
+
+    expect(mistral.map(({ model }) => model)).toEqual(["mistral-large-latest"]);
+    expect(groq.map(({ model }) => model)).toEqual(["qwen/qwen3.6-27b"]);
+    expect(groq[0]?.vision).toBe(true);
+  });
+});
+
+describe("adaptive inference health", () => {
+  const groqFast = defineModel({
+    provider: "groq",
+    keyName: "GROQ_API_KEY",
+    model: "example/fast",
+    vision: false,
+    quality: 8,
+    speed: 10,
+    specialties: ["general"],
+  });
+  const googleVision = defineModel({
+    provider: "google",
+    keyName: "GOOGLE_API_KEY",
+    model: "example/vision",
+    vision: true,
+    quality: 8,
+    speed: 8,
+    specialties: ["general"],
+  });
+
+  it("keeps the first routing wave provider-diverse and capability-compatible", () => {
+    const tracker = new InferenceTracker();
+    const selected = tracker.select([groqFast, googleVision], {
+      tier: "fast",
+      needsVision: false,
+      prompt: "Hello",
+      limit: 2,
+      random: () => 0,
+      now: 1_000,
+    });
+    const vision = tracker.select([groqFast, googleVision], {
+      tier: "fast",
+      needsVision: true,
+      prompt: "What is in this image?",
+      limit: 2,
+      random: () => 0,
+      now: 1_000,
+    });
+
+    expect(new Set(selected.map(({ provider }) => provider)).size).toBe(2);
+    expect(vision).toEqual([googleVision]);
+  });
+
+  it("shares model cooldowns across every use of the same provider/model", () => {
+    const tracker = new InferenceTracker();
+    tracker.started(groqFast, 1_000);
+    tracker.failed(groqFast, { status: 429, retryAfter: 60 }, 25, new Headers(), 1_025);
+    const duplicate = { ...groqFast };
+
+    expect(tracker.select([duplicate], {
+      tier: "fast",
+      needsVision: false,
+      prompt: "Hello",
+      random: () => 0,
+      now: 2_000,
+    })).toEqual([]);
+  });
+
+  it("opens a provider-wide circuit for payment failures", () => {
+    const tracker = new InferenceTracker();
+    const anotherGroqModel = { ...groqFast, id: "groq:example/other", model: "example/other" };
+    tracker.started(groqFast, 1_000);
+    tracker.failed(groqFast, { status: 402 }, 25, new Headers(), 1_025);
+
+    expect(tracker.isAvailable(anotherGroqModel, 2_000)).toBe(false);
+  });
+
+  it("learns remaining quota and reset timing from provider headers", () => {
+    const headers = new Headers({
+      "x-ratelimit-remaining-requests-day": "12",
+      "x-ratelimit-remaining-tokens-minute": "4096",
+      "x-ratelimit-reset-requests-day": "1m30s",
+    });
+
+    expect(quotaFromHeaders(headers, 10_000)).toEqual({
+      remainingRequests: 12,
+      remainingTokens: 4096,
+      quotaResetAt: 100_000,
+    });
   });
 });
 
@@ -136,5 +339,51 @@ describe("chat image validation", () => {
 
     expect(parseStoredAttachments([valid])).toEqual([valid]);
     expect(parseStoredAttachments([{ ...valid, storagePath: `../${valid.storagePath}` }])).toEqual([]);
+  });
+
+  it("accepts private document references only for their authenticated owner", () => {
+    const userId = "d866016b-bde8-4712-901a-3f016f95fca5";
+    const documentId = "044427d1-0e84-4ea3-8104-a6d40f939611";
+    const document = {
+      id: documentId,
+      name: "quarterly-report.pdf",
+      mimeType: "application/pdf",
+      size: 2048,
+      storagePath: `${userId}/pending/${documentId}.pdf`,
+    };
+
+    expect(validateIncomingChatAttachments([document], userId)).toEqual({
+      images: [],
+      documents: [document],
+    });
+    expect(parseStoredAttachments([document])).toEqual([document]);
+    expect(() => validateIncomingChatAttachments(
+      [document],
+      "fb2203f1-adfc-49ab-8da3-61b8807960fb",
+    )).toThrow(AttachmentValidationError);
+    expect(() => validateIncomingChatAttachments([document], null))
+      .toThrow("Sign in to attach documents.");
+  });
+});
+
+describe("pending attachment preview URLs", () => {
+  const attachment = {
+    id: "044427d1-0e84-4ea3-8104-a6d40f939611",
+    name: "Quarterly report & notes.pdf",
+    mimeType: "application/pdf" as const,
+    size: 2048,
+    url: "",
+  };
+
+  it("builds a private pending URL that remains valid with preview actions", () => {
+    const url = pendingDocumentAttachmentUrl(attachment);
+    expect(safeChatAttachmentUrl({ ...attachment, url })).toBe(url);
+    expect(attachmentActionUrl(url, "preview")).toContain("&preview=1");
+  });
+
+  it("rejects mismatched or untrusted pending URLs", () => {
+    const url = pendingDocumentAttachmentUrl(attachment);
+    expect(safeChatAttachmentUrl({ ...attachment, name: "different.pdf", url })).toBe("");
+    expect(safeChatAttachmentUrl({ ...attachment, url: "https://example.com/report.pdf" })).toBe("");
   });
 });

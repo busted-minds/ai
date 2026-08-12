@@ -2,7 +2,11 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
 
-function applySecurityHeaders(response: NextResponse, pathname: string) {
+function applySecurityHeaders(
+  response: NextResponse,
+  pathname: string,
+  sameOriginPreview = false,
+) {
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
@@ -12,6 +16,9 @@ function applySecurityHeaders(response: NextResponse, pathname: string) {
     // file:// prototypes whose opaque origins do not reliably match `*`.
     response.headers.delete("X-Frame-Options");
     response.headers.delete("Content-Security-Policy");
+  } else if (sameOriginPreview) {
+    response.headers.set("X-Frame-Options", "SAMEORIGIN");
+    response.headers.set("Content-Security-Policy", "frame-ancestors 'self'");
   } else {
     response.headers.set("X-Frame-Options", "DENY");
     response.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
@@ -20,9 +27,15 @@ function applySecurityHeaders(response: NextResponse, pathname: string) {
 }
 
 export async function proxy(request: NextRequest) {
+  const sameOriginPreview = request.nextUrl.pathname.startsWith("/api/attachments/")
+    && request.nextUrl.searchParams.get("preview") === "1";
   const config = getSupabasePublicConfig();
   if (!config) {
-    return applySecurityHeaders(NextResponse.next({ request }), request.nextUrl.pathname);
+    return applySecurityHeaders(
+      NextResponse.next({ request }),
+      request.nextUrl.pathname,
+      sameOriginPreview,
+    );
   }
 
   let response = NextResponse.next({ request });
@@ -47,9 +60,9 @@ export async function proxy(request: NextRequest) {
     destination.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
     const redirect = NextResponse.redirect(destination);
     for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
-    return applySecurityHeaders(redirect, request.nextUrl.pathname);
+    return applySecurityHeaders(redirect, request.nextUrl.pathname, sameOriginPreview);
   }
-  return applySecurityHeaders(response, request.nextUrl.pathname);
+  return applySecurityHeaders(response, request.nextUrl.pathname, sameOriginPreview);
 }
 
 export const config = {
