@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getInferenceTelemetry } from "@/lib/ai/providers";
+import { getInferenceAvailability, getInferenceTelemetry } from "@/lib/ai/providers";
 import {
   forceModelCatalogRefresh,
   getFreeModelCatalog,
@@ -31,7 +31,19 @@ export async function GET(request: Request) {
     ? await forceModelCatalogRefresh()
     : await getFreeModelCatalog();
   const telemetry = getInferenceTelemetry();
-  const status = catalog.providers.some((provider) => provider.configured && provider.eligibleModels > 0)
+  const runtimeAvailability = getInferenceAvailability(catalog.models);
+  const providers = catalog.providers.map((provider) => ({
+    ...provider,
+    ...(runtimeAvailability.find((runtime) => runtime.provider === provider.provider) ?? {
+      routableModels: 0,
+      verifiedModels: 0,
+      blockedModels: 0,
+      state: "unknown" as const,
+    }),
+  }));
+  const routableModels = providers.reduce((total, provider) => total + provider.routableModels, 0);
+  const verifiedModels = providers.reduce((total, provider) => total + provider.verifiedModels, 0);
+  const status = providers.some((provider) => provider.configured && provider.routableModels > 0)
     ? "operational"
     : "unavailable";
 
@@ -39,8 +51,10 @@ export async function GET(request: Request) {
     status,
     catalog: {
       refreshedAt: catalog.refreshedAt,
-      eligibleModels: catalog.models.length,
-      providers: catalog.providers,
+      catalogCandidates: catalog.models.length,
+      routableModels,
+      verifiedModels,
+      providers,
     },
     telemetry,
   }, {

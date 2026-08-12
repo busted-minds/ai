@@ -19,10 +19,6 @@ const GOOGLE_FREE_CHAT_MODELS = new Set([
   "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
   "gemini-3-flash-preview",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash-lite-preview-09-2025",
   "gemini-flash-latest",
   "gemini-flash-lite-latest",
   "gemma-4-26b-a4b-it",
@@ -36,9 +32,15 @@ const GROQ_RETIREMENTS: Readonly<Record<string, string>> = {
   "meta-llama/llama-4-scout-17b-16e-instruct": "2026-07-17T00:00:00Z",
 };
 
-const UNSUITABLE_MODEL_PATTERN = /(?:^|[\/_:-])(?:audio|clip|embed(?:ding)?|guard|image(?:gen)?|moderation|ocr|parse|rerank(?:er)?|retriev(?:al|er)?|reward|safeguard|safety|speech|tts|whisper)(?:$|[\/_:-])/i;
-const NVIDIA_CHAT_PATTERN = /(?:chat|command|coder?|deepseek|falcon|fuyu|gemma|glm|gpt|granite|instruct|jamba|llama|mistral|mixtral|nemotron|neva|phi|pixtral|qwen|reason|reka|solar|vila|yi-)/i;
-const VISION_PATTERN = /(?:^|[\/_-])(?:fuyu|omni|pixtral|vlm?|vision|vila|neva)(?:$|[\/_-])/i;
+/** Model families whose endpoint is not a general text-answering chat model. */
+const UNSUITABLE_MODEL_PATTERN = /(?:audio|clip|diffusion|embed|guard|image(?:gen)?|lyria|moderation|ocr|parse|rerank|retriev|reward|safety|speech|translate|tts|whisper)/i;
+/** NVIDIA's list endpoint retains many retired models, so admit maintained families only. */
+const NVIDIA_CURRENT_CHAT_PATTERN = /^(?:deepseek-ai\/deepseek-v\d+-flash-[\d-]+|google\/gemma-4-[\w.-]+|mistralai\/mistral-nemotron|nvidia\/llama-3\.3-nemotron-super-49b-v1\.5|nvidia\/nemotron-(?:3(?:\.5)?|4|mini|nano)[\w.-]*|nvidia\/nvidia-nemotron-[\w.-]+|openai\/gpt-oss-(?:20b|120b)|z-ai\/glm-[\d.]+)$/i;
+const NVIDIA_INCOMPATIBLE_CHAT_MODELS = new Set([
+  // Still returned by NVIDIA's historical catalog, but its chat endpoint is 404.
+  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+]);
+const VISION_PATTERN = /(?:fuyu|gemma-[34]|omni|pixtral|(?:^|[\/_-])vl(?:$|[\/_-])|vision|vila|neva)/i;
 const REASONING_PATTERN = /(?:deepseek|gpt-oss|magistral|nemotron|o[1-9](?:$|[-/])|qwq|reason|thinking)/i;
 const CODE_PATTERN = /(?:code|coder|codestral|devstral|gpt-oss|leanstral|qwen)/i;
 const MULTILINGUAL_PATTERN = /(?:allam|aya|command-r|glm|mistral|qwen)/i;
@@ -49,7 +51,7 @@ export type ProviderCatalogStatus = {
   provider: ProviderName;
   configured: boolean;
   source: "catalog" | "fallback" | "unconfigured";
-  eligibleModels: number;
+  catalogModels: number;
   refreshedAt: string | null;
   error: string | null;
 };
@@ -124,15 +126,18 @@ function discoveredModel(
   options: { vision?: boolean; contextWindow?: number; source?: ModelSpec["source"] } = {},
 ): ModelSpec {
   const definition = PROVIDER_BY_NAME[provider];
+  const fallback = FALLBACK_MODELS.find((candidate) => (
+    candidate.provider === provider && candidate.model === model
+  ));
   return defineModel({
     provider,
     keyName: definition.keyName,
     model,
-    vision: options.vision ?? VISION_PATTERN.test(model),
-    quality: inferredQuality(model),
-    speed: inferredSpeed(model),
+    vision: options.vision ?? fallback?.vision ?? VISION_PATTERN.test(model),
+    quality: fallback?.quality ?? inferredQuality(model),
+    speed: fallback?.speed ?? inferredSpeed(model),
     ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}),
-    specialties: specialties(model),
+    specialties: fallback?.specialties ?? specialties(model),
     source: options.source ?? "catalog",
   });
 }
@@ -225,7 +230,12 @@ function parseNvidia(payload: unknown): ModelSpec[] {
   const root = record(payload);
   return records(root?.data).flatMap((item) => {
     const model = stringValue(item.id);
-    if (!model || UNSUITABLE_MODEL_PATTERN.test(model) || !NVIDIA_CHAT_PATTERN.test(model)) return [];
+    if (
+      !model
+      || UNSUITABLE_MODEL_PATTERN.test(model)
+      || NVIDIA_INCOMPATIBLE_CHAT_MODELS.has(model)
+      || !NVIDIA_CURRENT_CHAT_PATTERN.test(model)
+    ) return [];
     return [discoveredModel("nvidia", model)];
   });
 }
@@ -299,7 +309,7 @@ async function refreshCatalog(): Promise<ModelCatalogSnapshot> {
           provider: provider.name,
           configured: false,
           source: "unconfigured" as const,
-          eligibleModels: 0,
+          catalogModels: 0,
           refreshedAt: null,
           error: null,
         },
@@ -313,7 +323,7 @@ async function refreshCatalog(): Promise<ModelCatalogSnapshot> {
           provider: provider.name,
           configured: true,
           source: "catalog" as const,
-          eligibleModels: models.length,
+          catalogModels: models.length,
           refreshedAt,
           error: null,
         },
@@ -326,7 +336,7 @@ async function refreshCatalog(): Promise<ModelCatalogSnapshot> {
           provider: provider.name,
           configured: true,
           source: "fallback" as const,
-          eligibleModels: models.length,
+          catalogModels: models.length,
           refreshedAt,
           error: safeCatalogError(caught),
         },
@@ -345,8 +355,8 @@ async function refreshCatalog(): Promise<ModelCatalogSnapshot> {
   console.info("[ai-catalog]", JSON.stringify({
     event: "refresh",
     models: models.length,
-    providers: snapshot.providers.map(({ provider, source, eligibleModels, error }) => ({
-      provider, source, eligibleModels, error,
+    providers: snapshot.providers.map(({ provider, source, catalogModels, error }) => ({
+      provider, source, catalogModels, error,
     })),
   }));
   return snapshot;

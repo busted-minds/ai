@@ -4,6 +4,7 @@ import { generateAnswer, type InferenceImage, type InferenceMessage } from "@/li
 import { normalizeChatMode } from "@/lib/ai/modes";
 import { normalizeCustomInstructions } from "@/lib/chat-preferences";
 import { makeThreadTitle } from "@/lib/chat-data";
+import { activeMessagePath } from "@/lib/chat-branches";
 import { isUuid } from "@/lib/chat-projects";
 import {
   AttachmentValidationError,
@@ -46,6 +47,7 @@ type ChatRequest = {
   replaceFromMessageId?: unknown;
   regenerateFromMessageId?: unknown;
   regenerateInstruction?: unknown;
+  parentMessageId?: unknown;
   useSearch?: unknown;
   mode?: unknown;
   privateChat?: unknown;
@@ -57,6 +59,7 @@ type StoredMessage = {
   content: string;
   attachments?: unknown;
   attachment_context?: string;
+  parent_message_id?: string | null;
   created_at: string;
 };
 
@@ -259,6 +262,9 @@ export async function POST(request: Request) {
   const regenerateInstruction = typeof body?.regenerateInstruction === "string"
     ? body.regenerateInstruction.trim()
     : "";
+  const requestedParentMessageId = typeof body?.parentMessageId === "string"
+    ? body.parentMessageId
+    : null;
   const useSearch = body?.useSearch === true;
   const privateChat = body?.privateChat === true;
   const mode = normalizeChatMode(body?.mode);
@@ -331,8 +337,7 @@ export async function POST(request: Request) {
   let threadId: string | null = null;
   let threadProjectId: string | null = requestedProjectId;
   let history: InferenceMessage[] = [];
-  let messagesToDelete: string[] = [];
-  let attachmentsToDelete: StoredChatAttachment[] = [];
+  let branchParentMessageId: string | null = requestedParentMessageId;
   let replacementAttachments: StoredChatAttachment[] = [];
   let replacementDocumentContext = "";
   const firstAttachment = incomingImages[0] ?? incomingDocuments[0];
@@ -342,7 +347,7 @@ export async function POST(request: Request) {
   if (user && requestedThreadId) {
     const { data: thread } = await supabase
       .from("chat_threads")
-      .select("id,title,project_id")
+      .select("id,title,project_id,active_leaf_id")
       .eq("id", requestedThreadId)
       .maybeSingle();
     if (!thread) return NextResponse.json({ message: "Conversation not found." }, { status: 404 });
@@ -351,12 +356,23 @@ export async function POST(request: Request) {
     threadProjectId = thread.project_id;
     const { data: rows, error } = await supabase
       .from("chat_messages")
-      .select("id,role,content,attachments,attachment_context,created_at")
+      .select("id,role,content,attachments,attachment_context,parent_message_id,created_at")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true })
-      .limit(200);
+      .limit(1000);
     if (error) return NextResponse.json({ message: "Conversation history is unavailable." }, { status: 503 });
-    const storedMessages = (rows ?? []) as StoredMessage[];
+    const allStoredMessages = (rows ?? []) as StoredMessage[];
+    const storedMessages = activeMessagePath(
+      allStoredMessages.map((item) => ({
+        id: item.id,
+        role: item.role,
+        content: item.content,
+        createdAt: item.created_at,
+        parentId: item.parent_message_id ?? null,
+        attachments: [],
+      })),
+      thread.active_leaf_id,
+    ).map((message) => allStoredMessages.find(({ id }) => id === message.id) as StoredMessage);
     const targetId = replaceFromMessageId ?? regenerateFromMessageId;
     if (targetId) {
       const targetIndex = storedMessages.findIndex((item) => item.id === targetId);
@@ -366,9 +382,7 @@ export async function POST(request: Request) {
       }
       const historyRows = storedMessages.slice(0, targetIndex);
       history = await storedRowsForInference(supabase, historyRows);
-      const deletedRows = storedMessages.slice(targetIndex);
-      messagesToDelete = deletedRows.map((item) => item.id);
-      attachmentsToDelete = deletedRows.flatMap((item) => parseStoredAttachments(item.attachments));
+      branchParentMessageId = storedMessages[targetIndex]?.parent_message_id ?? null;
       if (replaceFromMessageId) {
         replacementAttachments = parseStoredAttachments(storedMessages[targetIndex]?.attachments);
         replacementDocumentContext = storedMessages[targetIndex]?.attachment_context ?? "";
@@ -379,6 +393,7 @@ export async function POST(request: Request) {
       }
     } else {
       history = await storedRowsForInference(supabase, storedMessages);
+      branchParentMessageId = storedMessages.at(-1)?.id ?? null;
     }
   } else if (!user || privateChat) {
     history = await sanitizeHistory(body?.history, supabase, user?.id ?? null);
@@ -481,10 +496,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "The files could not be stored securely. Try again." }, { status: 503 });
     }
 
-    const { error } = messagesToDelete.length
-      ? await supabase.rpc("replace_chat_branch", {
+    const { error } = await supabase.rpc("append_chat_branch", {
           p_thread_id: threadId,
-          p_delete_message_ids: messagesToDelete,
+          p_parent_message_id: branchParentMessageId,
           p_user_message_id: userMessageId,
           p_user_content: userMessageId ? message : null,
           p_assistant_message_id: assistantMessageId,
@@ -492,48 +506,18 @@ export async function POST(request: Request) {
           p_title: shouldReplaceThreadTitle ? threadTitle : null,
           p_user_attachments: storedUserAttachments,
           p_user_attachment_context: currentDocumentContext,
-        })
-      : await supabase.from("chat_messages").insert([
-          {
-            id: userMessageId,
-            thread_id: threadId,
-            user_id: user.id,
-            role: "user",
-            content: message,
-            attachments: storedUserAttachments,
-            attachment_context: currentDocumentContext,
-            created_at: userCreatedAt,
-          },
-          {
-            id: assistantMessageId,
-            thread_id: threadId,
-            user_id: user.id,
-            role: "assistant",
-            content: answer,
-            attachments: [],
-            attachment_context: "",
-            created_at: assistantCreatedAt,
-          },
-        ]);
+        });
     if (error) {
       console.error("Chat persistence failed", {
         code: error.code,
         message: error.message,
         details: error.details,
         hint: error.hint,
-        operation: messagesToDelete.length ? "replace-branch" : "insert-messages",
+        operation: "append-branch",
       });
       await removeStoredAttachments(supabase, newlyUploadedImages);
       if (createdThread) await supabase.from("chat_threads").delete().eq("id", threadId);
       return NextResponse.json({ message: "The answer arrived, but the conversation could not be saved." }, { status: 503 });
-    }
-
-    if (attachmentsToDelete.length) {
-      const preservedPaths = new Set(storedUserAttachments.map(({ storagePath }) => storagePath));
-      await removeStoredAttachments(
-        supabase,
-        attachmentsToDelete.filter(({ storagePath }) => !preservedPaths.has(storagePath)),
-      );
     }
   }
 
@@ -567,10 +551,18 @@ export async function POST(request: Request) {
           role: "user",
           content: message,
           createdAt: userCreatedAt,
+          parentId: branchParentMessageId,
           ...(responseAttachments.length ? { attachments: responseAttachments } : {}),
         }
       : null,
-    message: { id: assistantMessageId, role: "assistant", content: answer, createdAt: assistantCreatedAt },
+    message: {
+      id: assistantMessageId,
+      role: "assistant",
+      content: answer,
+      createdAt: assistantCreatedAt,
+      parentId: userMessageId ?? branchParentMessageId,
+    },
+    activeLeafId: assistantMessageId,
     remainingGuestMessages: user ? null : remainingGuestMessages(nextUsed),
     privateChat,
   });

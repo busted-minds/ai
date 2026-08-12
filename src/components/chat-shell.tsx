@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Code2,
   Compass,
@@ -45,7 +46,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -71,6 +72,12 @@ import {
 import type { ChatAttachment, ChatMessage, ChatProject, ChatThread, Viewer } from "@/lib/types";
 import { readJsonResponse } from "@/lib/client-response";
 import { normalizeProjectName } from "@/lib/chat-projects";
+import {
+  activeMessagePath,
+  newestLeafForBranch,
+  normalizeMessageGraph,
+  siblingMessages,
+} from "@/lib/chat-branches";
 
 type ChatShellProps = { initialViewer: Viewer; initialThread?: ChatThread | null };
 type ChatResponse = {
@@ -79,6 +86,7 @@ type ChatResponse = {
   title: string;
   userMessage: ChatMessage | null;
   message: ChatMessage;
+  activeLeafId: string;
   remainingGuestMessages: number | null;
   privateChat?: boolean;
 };
@@ -115,7 +123,17 @@ function safeGuestThreads(): ChatThread[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(GUEST_THREADS_KEY) ?? "[]") as unknown;
     return Array.isArray(parsed)
-      ? (parsed as ChatThread[]).slice(0, 20).map((thread) => ({ ...thread, projectId: thread.projectId ?? null }))
+      ? (parsed as ChatThread[]).slice(0, 20).map((thread) => {
+          const allMessages = normalizeMessageGraph(thread.allMessages ?? thread.messages ?? []);
+          const activeLeafId = thread.activeLeafId ?? allMessages.at(-1)?.id ?? null;
+          return {
+            ...thread,
+            projectId: thread.projectId ?? null,
+            allMessages,
+            activeLeafId,
+            messages: activeMessagePath(allMessages, activeLeafId),
+          };
+        })
       : [];
   } catch {
     return [];
@@ -132,12 +150,14 @@ function safeGuestProjects(): ChatProject[] {
 }
 
 function writeGuestThreads(threads: ChatThread[]) {
+  const persistableMessages = (messages: ChatMessage[] | undefined) => messages?.map((message) => ({
+    ...message,
+    attachments: message.attachments?.map((attachment) => ({ ...attachment, url: "" })),
+  }));
   const persistable = threads.slice(0, 20).map((thread) => ({
     ...thread,
-    messages: thread.messages?.map((message) => ({
-      ...message,
-      attachments: message.attachments?.map((attachment) => ({ ...attachment, url: "" })),
-    })),
+    messages: persistableMessages(thread.messages),
+    allMessages: persistableMessages(thread.allMessages),
   }));
   localStorage.setItem(GUEST_THREADS_KEY, JSON.stringify(persistable));
 }
@@ -416,12 +436,14 @@ function MarkdownMessage({
   mode,
   onRegenerate,
   onRegenerateWithSearch,
+  versionNavigation,
 }: {
   content: string;
   disabled: boolean;
   mode: ChatMode;
   onRegenerate: (instruction?: string, responseMode?: ChatMode) => void;
   onRegenerateWithSearch: () => void;
+  versionNavigation?: ReactNode;
 }) {
   return (
     <div className="assistant-response">
@@ -429,6 +451,7 @@ function MarkdownMessage({
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </div>
       <div className="message-actions">
+        {versionNavigation}
         <CopyMessageAction content={content} label="Copy answer" />
         <RegenerateMenu disabled={disabled} mode={mode} onRegenerate={onRegenerate} />
         <button
@@ -446,13 +469,62 @@ function MarkdownMessage({
   );
 }
 
+function MessageVersionNavigation({
+  messages,
+  message,
+  disabled,
+  onSelect,
+}: {
+  messages: ChatMessage[];
+  message: ChatMessage;
+  disabled: boolean;
+  onSelect: (messageId: string) => void;
+}) {
+  const siblings = siblingMessages(messages, message.id);
+  if (siblings.length < 2) return null;
+  const index = siblings.findIndex(({ id }) => id === message.id);
+  return (
+    <span className="message-version-navigation" aria-label={`Version ${index + 1} of ${siblings.length}`}>
+      <button
+        className="message-action"
+        type="button"
+        disabled={disabled || index <= 0}
+        onClick={() => onSelect(siblings[index - 1].id)}
+        aria-label="Previous version"
+        title="Previous version"
+      >
+        <ChevronLeft size={15} />
+      </button>
+      <span>{index + 1} / {siblings.length}</span>
+      <button
+        className="message-action"
+        type="button"
+        disabled={disabled || index >= siblings.length - 1}
+        onClick={() => onSelect(siblings[index + 1].id)}
+        aria-label="Next version"
+        title="Next version"
+      >
+        <ChevronRight size={15} />
+      </button>
+    </span>
+  );
+}
+
 export function ChatShell({ initialViewer, initialThread = null }: ChatShellProps) {
+  const initialAllMessages = normalizeMessageGraph(initialThread?.allMessages ?? initialThread?.messages ?? []);
   const [viewer] = useState(initialViewer);
   const [threads, setThreads] = useState<ChatThread[]>(initialThread ? [initialThread] : []);
   const [projects, setProjects] = useState<ChatProject[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(initialThread?.id ?? null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(initialThread?.projectId ?? null);
-  const [messages, setMessages] = useState<ChatMessage[]>(initialThread?.messages ?? []);
+  const [allMessages, setAllMessages] = useState<ChatMessage[]>(initialAllMessages);
+  const [activeLeafId, setActiveLeafId] = useState<string | null>(
+    initialThread?.activeLeafId ?? initialAllMessages.at(-1)?.id ?? null,
+  );
+  const messages = useMemo(
+    () => activeMessagePath(allMessages, activeLeafId),
+    [activeLeafId, allMessages],
+  );
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentPreparing, setAttachmentPreparing] = useState(false);
@@ -461,6 +533,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   const [defaultMode, setDefaultMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
   const [enterToSend, setEnterToSend] = useState(true);
   const [pending, setPending] = useState(false);
+  const [branchSwitching, setBranchSwitching] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(viewer.authenticated && !initialThread);
   const [remaining, setRemaining] = useState<number | null>(viewer.authenticated ? null : 10);
   const [error, setError] = useState("");
@@ -753,7 +826,8 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     setCurrentThreadId(null);
     replaceThreadInUrl(null);
     setActiveProjectId(projectId);
-    setMessages([]);
+    setAllMessages([]);
+    setActiveLeafId(null);
     setInput("");
     setAttachments([]);
     setError("");
@@ -787,7 +861,9 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     setProjectSubmenuOpen(false);
     setFilesPanelOpen(false);
     if (!viewer.authenticated) {
-      setMessages(thread.messages ?? []);
+      const threadMessages = normalizeMessageGraph(thread.allMessages ?? thread.messages ?? []);
+      setAllMessages(threadMessages);
+      setActiveLeafId(thread.activeLeafId ?? threadMessages.at(-1)?.id ?? null);
       return;
     }
     setHistoryLoading(true);
@@ -795,7 +871,9 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       const response = await fetch(`/api/threads/${thread.id}`, { cache: "no-store" });
       const payload = await response.json() as { thread?: ChatThread; message?: string };
       if (!response.ok || !payload.thread) throw new Error(payload.message ?? "Conversation could not be loaded.");
-      setMessages(payload.thread.messages ?? []);
+      const threadMessages = normalizeMessageGraph(payload.thread.allMessages ?? payload.thread.messages ?? []);
+      setAllMessages(threadMessages);
+      setActiveLeafId(payload.thread.activeLeafId ?? threadMessages.at(-1)?.id ?? null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Conversation could not be loaded.");
     } finally {
@@ -816,7 +894,8 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     setCurrentThreadId(null);
     replaceThreadInUrl(null);
     setActiveProjectId(null);
-    setMessages([]);
+    setAllMessages([]);
+    setActiveLeafId(null);
     setInput("");
     setAttachments([]);
     setError("");
@@ -1076,21 +1155,34 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     messageAttachments?: ChatAttachment[];
   }) => {
     const trimmedText = text.trim();
-    if ((!trimmedText && !messageAttachments.length && !regenerateFromMessageId) || pending) return false;
+    if ((!trimmedText && !messageAttachments.length && !regenerateFromMessageId) || pending || branchSwitching) return false;
     if (!viewer.authenticated && remaining === 0) {
       setError("Guest brainpower exhausted. Sign in for unlimited conversations.");
       return false;
     }
 
-    const originalMessages = messages;
+    const originalAllMessages = allMessages;
+    const originalActiveLeafId = activeLeafId;
+    const targetMessageId = replaceFromMessageId ?? regenerateFromMessageId;
+    const targetMessage = targetMessageId
+      ? originalAllMessages.find(({ id }) => id === targetMessageId)
+      : null;
+    const parentMessageId = targetMessageId
+      ? targetMessage?.parentId ?? null
+      : baseMessages.at(-1)?.id ?? null;
     const optimisticUserMessage: ChatMessage | null = regenerateFromMessageId ? null : {
       id: localId(),
       role: "user",
       content: trimmedText,
       createdAt: new Date().toISOString(),
+      parentId: parentMessageId,
       ...(messageAttachments.length ? { attachments: messageAttachments } : {}),
     };
-    setMessages([...baseMessages, ...(optimisticUserMessage ? [optimisticUserMessage] : [])]);
+    setAllMessages([
+      ...originalAllMessages,
+      ...(optimisticUserMessage ? [optimisticUserMessage] : []),
+    ]);
+    setActiveLeafId(optimisticUserMessage?.id ?? baseMessages.at(-1)?.id ?? null);
     setError("");
     setPending(true);
 
@@ -1109,6 +1201,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
           replaceFromMessageId,
           regenerateFromMessageId,
           regenerateInstruction,
+          parentMessageId,
           useSearch,
           mode: responseMode ?? mode,
           privateChat: isPrivateChat,
@@ -1120,12 +1213,15 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       }
 
       if (!regenerateFromMessageId && !payload.userMessage) throw new Error("The sent message could not be saved.");
-      const nextMessages = [
-        ...baseMessages,
+      const addedMessages = [
         ...(payload.userMessage ? [payload.userMessage] : []),
         payload.message,
       ];
-      setMessages(nextMessages);
+      const nextAllMessages = normalizeMessageGraph([...originalAllMessages, ...addedMessages]);
+      const nextActiveLeafId = payload.activeLeafId ?? payload.message.id;
+      const nextMessages = activeMessagePath(nextAllMessages, nextActiveLeafId);
+      setAllMessages(nextAllMessages);
+      setActiveLeafId(nextActiveLeafId);
       setRemaining(payload.remainingGuestMessages);
       if (isPrivateChat) {
         setCurrentThreadId(null);
@@ -1144,12 +1240,15 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
           projectId: payload.projectId ?? existing?.projectId ?? activeProjectId,
           updatedAt: new Date().toISOString(),
           messages: viewer.authenticated ? undefined : nextMessages,
+          allMessages: viewer.authenticated ? undefined : nextAllMessages,
+          activeLeafId: viewer.authenticated ? undefined : nextActiveLeafId,
         };
         return [updated, ...current.filter((thread) => thread.id !== resolvedId)];
       });
       return true;
     } catch (caught) {
-      setMessages(originalMessages);
+      setAllMessages(originalAllMessages);
+      setActiveLeafId(originalActiveLeafId);
       setError(caught instanceof Error ? caught.message : "Something broke. Even genius has infrastructure.");
       return false;
     } finally {
@@ -1161,7 +1260,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     event?.preventDefault();
     const text = input.trim();
     const selectedAttachments = attachments;
-    if ((!text && !selectedAttachments.length) || pending || attachmentPreparing) return;
+    if ((!text && !selectedAttachments.length) || pending || branchSwitching || attachmentPreparing) return;
     setInput("");
     setAttachments([]);
     if (composerRef.current) composerRef.current.style.height = "auto";
@@ -1173,7 +1272,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   };
 
   const chooseAttachments = async (files: FileList | null) => {
-    if (!files?.length || pending || attachmentPreparing) return;
+    if (!files?.length || pending || branchSwitching || attachmentPreparing) return;
     const selectedFiles = Array.from(files);
     if (fileInputRef.current) fileInputRef.current.value = "";
     setAttachmentPreparing(true);
@@ -1195,7 +1294,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   };
 
   const beginEdit = (message: ChatMessage) => {
-    if (pending) return;
+    if (pending || branchSwitching) return;
     setEditingMessageId(message.id);
     setEditInput(message.content);
     setError("");
@@ -1203,7 +1302,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
 
   const saveEdit = async (message: ChatMessage, index: number) => {
     const text = editInput.trim();
-    if ((!text && !message.attachments?.length) || text === message.content || pending) return;
+    if ((!text && !message.attachments?.length) || text === message.content || pending || branchSwitching) return;
     const sent = await requestAnswer({
       text,
       baseMessages: messages.slice(0, index),
@@ -1222,7 +1321,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     regenerateInstruction?: string,
     responseMode: ChatMode = mode,
   ) => {
-    if (pending) return;
+    if (pending || branchSwitching) return;
     setEditingMessageId(null);
     if (responseMode !== mode) setMode(responseMode);
     await requestAnswer({
@@ -1235,7 +1334,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   };
 
   const regenerateWithSearch = async (message: ChatMessage, index: number) => {
-    if (pending) return;
+    if (pending || branchSwitching) return;
     setEditingMessageId(null);
     await requestAnswer({
       text: "",
@@ -1243,6 +1342,48 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       regenerateFromMessageId: message.id,
       useSearch: true,
     });
+  };
+
+  const selectMessageVersion = async (messageId: string) => {
+    if (pending || branchSwitching) return;
+    const previousLeafId = activeLeafId;
+    const nextLeafId = newestLeafForBranch(allMessages, messageId);
+    if (!nextLeafId || nextLeafId === previousLeafId) return;
+
+    setEditingMessageId(null);
+    setActiveLeafId(nextLeafId);
+    setError("");
+
+    if (!viewer.authenticated || isPrivateChat || !currentThreadId) {
+      if (!isPrivateChat && currentThreadId) {
+        const nextMessages = activeMessagePath(allMessages, nextLeafId);
+        updateThreads((current) => current.map((thread) => thread.id === currentThreadId
+          ? { ...thread, messages: nextMessages, allMessages, activeLeafId: nextLeafId }
+          : thread));
+      }
+      return;
+    }
+
+    setBranchSwitching(true);
+    try {
+      const response = await fetch(`/api/threads/${currentThreadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeMessageId: messageId }),
+      });
+      const payload = await readJsonResponse<{ thread?: ChatThread; message?: string }>(response);
+      if (!response.ok || !payload.thread) {
+        throw new Error(payload.message ?? "That message version could not be selected.");
+      }
+      const nextAllMessages = normalizeMessageGraph(payload.thread.allMessages ?? payload.thread.messages ?? []);
+      setAllMessages(nextAllMessages);
+      setActiveLeafId(payload.thread.activeLeafId ?? nextAllMessages.at(-1)?.id ?? null);
+    } catch (caught) {
+      setActiveLeafId(previousLeafId);
+      setError(caught instanceof Error ? caught.message : "That message version could not be selected.");
+    } finally {
+      setBranchSwitching(false);
+    }
   };
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1791,7 +1932,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                 className={isPrivateChat ? "private-chat-button is-active" : "private-chat-button"}
                 type="button"
                 onClick={togglePrivateChat}
-                disabled={pending}
+                disabled={pending || branchSwitching}
                 aria-pressed={isPrivateChat}
                 aria-label={isPrivateChat ? "Exit and discard private chat" : "Start a private chat"}
                 title={isPrivateChat ? "Exit and discard private chat" : "Private chat — not saved or shareable"}
@@ -1905,8 +2046,14 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                         <ImageAttachments attachments={message.attachments} />
                         {message.content && <p>{message.content}</p>}
                         <div className="message-actions user-message-actions">
+                          <MessageVersionNavigation
+                            messages={allMessages}
+                            message={message}
+                            disabled={pending || branchSwitching}
+                            onSelect={(messageId) => void selectMessageVersion(messageId)}
+                          />
                           {message.content && <CopyMessageAction content={message.content} label="Copy your message" />}
-                          <button className="message-action" type="button" onClick={() => beginEdit(message)} disabled={pending} aria-label="Edit and resend message">
+                          <button className="message-action" type="button" onClick={() => beginEdit(message)} disabled={pending || branchSwitching} aria-label="Edit and resend message">
                             <Pencil size={14} />
                           </button>
                         </div>
@@ -1919,10 +2066,18 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                   <div>
                     <MarkdownMessage
                       content={message.content}
-                      disabled={pending}
+                      disabled={pending || branchSwitching}
                       mode={mode}
                       onRegenerate={(instruction, responseMode) => void regenerate(message, index, instruction, responseMode)}
                       onRegenerateWithSearch={() => void regenerateWithSearch(message, index)}
+                      versionNavigation={(
+                        <MessageVersionNavigation
+                          messages={allMessages}
+                          message={message}
+                          disabled={pending || branchSwitching}
+                          onSelect={(messageId) => void selectMessageVersion(messageId)}
+                        />
+                      )}
                     />
                   </div>
                 </article>
@@ -1982,7 +2137,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                 onKeyDown={onComposerKeyDown}
                 placeholder={isPrivateChat ? "Ask anything in this private chat." : "Ask anything. I can take it."}
                 aria-label="Message Busted Minds AI"
-                disabled={pending || (!viewer.authenticated && remaining === 0)}
+                disabled={pending || branchSwitching || (!viewer.authenticated && remaining === 0)}
               />
               <div className="composer-bottom">
                 <button
@@ -1991,6 +2146,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                   onClick={() => fileInputRef.current?.click()}
                   disabled={
                     pending
+                    || branchSwitching
                     || attachmentPreparing
                     || attachments.length >= MAX_CHAT_ATTACHMENTS
                     || (!viewer.authenticated && remaining === 0)
@@ -2000,7 +2156,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                 >
                   <Paperclip size={17} />
                 </button>
-                <ChatModePicker key={pending ? "mode-busy" : "mode-ready"} mode={mode} onChange={setMode} disabled={pending} />
+                <ChatModePicker key={pending || branchSwitching ? "mode-busy" : "mode-ready"} mode={mode} onChange={setMode} disabled={pending || branchSwitching} />
                 {attachmentPreparing && <span className="image-preparing">Preparing file…</span>}
                 <button
                   className="composer-send-button"
@@ -2008,6 +2164,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                   disabled={
                     (!input.trim() && !attachments.length)
                     || pending
+                    || branchSwitching
                     || attachmentPreparing
                     || (!viewer.authenticated && remaining === 0)
                   }

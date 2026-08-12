@@ -111,15 +111,6 @@ export const FALLBACK_MODELS: readonly ModelSpec[] = [
     vision: true, quality: 7.8, speed: 9.8, specialties: general,
   }),
   defineModel({
-    provider: "google", keyName: "GOOGLE_API_KEY", model: "gemini-2.5-pro",
-    vision: true, quality: 9, speed: 5.5, specialties: codeReasoning,
-  }),
-  defineModel({
-    provider: "google", keyName: "GOOGLE_API_KEY", model: "gemini-2.5-flash",
-    vision: true, quality: 8.2, speed: 9, specialties: reasoning,
-  }),
-
-  defineModel({
     provider: "nvidia", keyName: "NVIDIA_API_KEY",
     model: "nvidia/nemotron-3.5-lightning-30b-a3b",
     vision: false, quality: 8.3, speed: 9.2, specialties: reasoning,

@@ -39,6 +39,13 @@ import {
   parseChatPreferences,
 } from "@/lib/chat-preferences";
 import { isUuid, MAX_CHAT_PROJECT_NAME_LENGTH, normalizeProjectName } from "@/lib/chat-projects";
+import {
+  activeMessagePath,
+  newestLeafForBranch,
+  normalizeMessageGraph,
+  siblingMessages,
+} from "@/lib/chat-branches";
+import type { ChatMessage } from "@/lib/types";
 
 process.env.ANON_USAGE_SECRET = "test-only-secret-with-enough-entropy";
 
@@ -66,6 +73,70 @@ describe("thread titles", () => {
   it("normalizes whitespace and keeps titles compact", () => {
     expect(makeThreadTitle("  Explain   entropy  ")).toBe("Explain entropy");
     expect(makeThreadTitle("x".repeat(100))).toHaveLength(52);
+  });
+});
+
+describe("retained conversation branches", () => {
+  const message = (
+    id: string,
+    role: "user" | "assistant",
+    parentId: string | null,
+    order: number,
+  ): ChatMessage => ({
+    id,
+    role,
+    parentId,
+    content: id,
+    createdAt: new Date(order * 1_000).toISOString(),
+  });
+
+  const graph = [
+    message("user-1", "user", null, 1),
+    message("answer-1", "assistant", "user-1", 2),
+    message("user-2", "user", "answer-1", 3),
+    message("answer-2", "assistant", "user-2", 4),
+    message("answer-1b", "assistant", "user-1", 5),
+    message("user-3", "user", "answer-1b", 6),
+    message("answer-3", "assistant", "user-3", 7),
+    message("user-1b", "user", null, 8),
+    message("answer-1c", "assistant", "user-1b", 9),
+  ];
+
+  it("resolves only the selected path while retaining sibling versions", () => {
+    expect(activeMessagePath(graph, "answer-3").map(({ id }) => id)).toEqual([
+      "user-1",
+      "answer-1b",
+      "user-3",
+      "answer-3",
+    ]);
+    expect(siblingMessages(graph, "answer-1b").map(({ id }) => id)).toEqual([
+      "answer-1",
+      "answer-1b",
+    ]);
+    expect(siblingMessages(graph, "user-1b").map(({ id }) => id)).toEqual([
+      "user-1",
+      "user-1b",
+    ]);
+  });
+
+  it("restores the latest descendant when an older version is selected", () => {
+    expect(newestLeafForBranch(graph, "answer-1")).toBe("answer-2");
+    expect(newestLeafForBranch(graph, "answer-1b")).toBe("answer-3");
+    expect(newestLeafForBranch(graph, "user-1b")).toBe("answer-1c");
+  });
+
+  it("upgrades legacy linear messages with missing parent metadata", () => {
+    const legacy = graph.slice(0, 3).map(({ id, role, content, createdAt }) => ({
+      id,
+      role,
+      content,
+      createdAt,
+    }));
+    expect(normalizeMessageGraph(legacy).map(({ parentId }) => parentId)).toEqual([
+      null,
+      "user-1",
+      "answer-1",
+    ]);
   });
 });
 
@@ -154,7 +225,7 @@ describe("free model registry", () => {
       ],
     });
 
-    expect(models.map(({ model }) => model)).toEqual(["gemini-3.6-flash", "gemini-2.5-pro"]);
+    expect(models.map(({ model }) => model)).toEqual(["gemini-3.6-flash"]);
     expect(models[0]).toMatchObject({ free: true, vision: true, contextWindow: 1_000_000 });
   });
 
@@ -183,6 +254,11 @@ describe("free model registry", () => {
           pricing: freePricing,
           architecture: { input_modalities: ["text"], output_modalities: ["text"] },
         },
+        {
+          id: "google/lyria-3-pro-preview",
+          pricing: freePricing,
+          architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+        },
       ],
     });
 
@@ -208,6 +284,23 @@ describe("free model registry", () => {
     expect(mistral.map(({ model }) => model)).toEqual(["mistral-large-latest"]);
     expect(groq.map(({ model }) => model)).toEqual(["qwen/qwen3.6-27b"]);
     expect(groq[0]?.vision).toBe(true);
+  });
+
+  it("rejects NVIDIA historical, embedding, guard, and generation-only entries", () => {
+    const models = parseProviderCatalog("nvidia", {
+      data: [
+        { id: "nvidia/nemotron-3.5-lightning-30b-a3b" },
+        { id: "nvidia/llama-3.1-nemotron-ultra-253b-v1" },
+        { id: "nvidia/llama-3.2-nv-embedqa-1b-v1" },
+        { id: "nvidia/llama-3.1-nemoguard-8b-topic-control" },
+        { id: "google/diffusiongemma-26b-a4b-it" },
+        { id: "nvidia/riva-translate-4b-instruct" },
+      ],
+    });
+
+    expect(models.map(({ model }) => model)).toEqual([
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+    ]);
   });
 });
 
@@ -252,6 +345,7 @@ describe("adaptive inference health", () => {
 
     expect(new Set(selected.map(({ provider }) => provider)).size).toBe(2);
     expect(vision).toEqual([googleVision]);
+    expect(tracker.snapshot(1_000).models).toEqual([]);
   });
 
   it("shares model cooldowns across every use of the same provider/model", () => {
@@ -276,6 +370,14 @@ describe("adaptive inference health", () => {
     tracker.failed(groqFast, { status: 402 }, 25, new Headers(), 1_025);
 
     expect(tracker.isAvailable(anotherGroqModel, 2_000)).toBe(false);
+    expect(tracker.catalogAvailability([groqFast, anotherGroqModel], 2_000)).toEqual([{
+      provider: "groq",
+      catalogModels: 2,
+      routableModels: 0,
+      verifiedModels: 0,
+      blockedModels: 2,
+      state: "blocked",
+    }]);
   });
 
   it("learns remaining quota and reset timing from provider headers", () => {

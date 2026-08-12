@@ -16,6 +16,7 @@ export type ChatMessage = {
   role: ChatRole;
   content: string;
   createdAt: string;
+  parentId?: string | null;
   attachments?: ChatAttachment[];
 };
 
@@ -26,6 +27,8 @@ export type ChatThread = {
   archived?: boolean;
   updatedAt: string;
   messages?: ChatMessage[];
+  allMessages?: ChatMessage[];
+  activeLeafId?: string | null;
 };
 
 export type ChatProject = {

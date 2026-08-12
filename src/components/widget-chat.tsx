@@ -8,6 +8,8 @@ import {
   BrainCircuit,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   ExternalLink,
   Lightbulb,
@@ -41,8 +43,14 @@ import {
   normalizeChatMode,
   type ChatMode,
 } from "@/lib/ai/modes";
-import type { ChatAttachment, ChatMessage, Viewer } from "@/lib/types";
+import type { ChatAttachment, ChatMessage, ChatThread, Viewer } from "@/lib/types";
 import { readJsonResponse } from "@/lib/client-response";
+import {
+  activeMessagePath,
+  newestLeafForBranch,
+  normalizeMessageGraph,
+  siblingMessages,
+} from "@/lib/chat-branches";
 
 type WidgetChatProps = {
   initialViewer: Viewer;
@@ -55,6 +63,7 @@ type ChatResponse = {
   title: string;
   userMessage: ChatMessage | null;
   message: ChatMessage;
+  activeLeafId: string;
   remainingGuestMessages: number | null;
 };
 
@@ -96,11 +105,15 @@ function persistableMessages(messages: ChatMessage[]) {
   }));
 }
 
-function safeStoredMessages(): ChatMessage[] {
+function safeStoredConversation(): { allMessages: ChatMessage[]; activeLeafId: string | null } {
   try {
     const stored = JSON.parse(localStorage.getItem(WIDGET_GUEST_MESSAGES_KEY) ?? "[]") as unknown;
-    if (!Array.isArray(stored)) return [];
-    return stored
+    const candidates = Array.isArray(stored)
+      ? stored
+      : stored && typeof stored === "object" && Array.isArray((stored as { allMessages?: unknown }).allMessages)
+        ? (stored as { allMessages: unknown[] }).allMessages
+        : [];
+    const allMessages = normalizeMessageGraph(candidates
       .filter((item): item is ChatMessage => {
         if (!item || typeof item !== "object") return false;
         const candidate = item as Partial<ChatMessage>;
@@ -111,9 +124,19 @@ function safeStoredMessages(): ChatMessage[] {
           typeof candidate.createdAt === "string"
         );
       })
-      .slice(-24);
+      .slice(-24));
+    const storedLeafId = !Array.isArray(stored) && stored && typeof stored === "object"
+      && typeof (stored as { activeLeafId?: unknown }).activeLeafId === "string"
+      ? (stored as { activeLeafId: string }).activeLeafId
+      : null;
+    return {
+      allMessages,
+      activeLeafId: storedLeafId && allMessages.some(({ id }) => id === storedLeafId)
+        ? storedLeafId
+        : allMessages.at(-1)?.id ?? null,
+    };
   } catch {
-    return [];
+    return { allMessages: [], activeLeafId: null };
   }
 }
 
@@ -135,6 +158,39 @@ function CopyAnswer({ content }: { content: string }) {
       {copied ? <Check size={13} /> : <Copy size={13} />}
       <span>{copied ? "Copied" : "Copy"}</span>
     </button>
+  );
+}
+
+function WidgetVersionNavigation({
+  messages,
+  message,
+  disabled,
+  onSelect,
+}: {
+  messages: ChatMessage[];
+  message: ChatMessage;
+  disabled: boolean;
+  onSelect: (messageId: string) => void;
+}) {
+  const siblings = siblingMessages(messages, message.id);
+  if (siblings.length < 2) return null;
+  const index = siblings.findIndex(({ id }) => id === message.id);
+  return (
+    <span className="widget-version-navigation" aria-label={`Version ${index + 1} of ${siblings.length}`}>
+      <button
+        type="button"
+        disabled={disabled || index <= 0}
+        onClick={() => onSelect(siblings[index - 1].id)}
+        aria-label="Previous version"
+      ><ChevronLeft size={13} /></button>
+      <span>{index + 1} / {siblings.length}</span>
+      <button
+        type="button"
+        disabled={disabled || index >= siblings.length - 1}
+        onClick={() => onSelect(siblings[index + 1].id)}
+        aria-label="Next version"
+      ><ChevronRight size={13} /></button>
+    </span>
   );
 }
 
@@ -221,7 +277,9 @@ function WidgetModePicker({
 
 export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetChatProps) {
   const router = useRouter();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
+  const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
+  const messages = activeMessagePath(allMessages, activeLeafId);
   const [guestHydrated, setGuestHydrated] = useState(initialViewer.authenticated);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -229,6 +287,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const [remaining, setRemaining] = useState(initialRemaining);
   const [pending, setPending] = useState(false);
+  const [branchSwitching, setBranchSwitching] = useState(false);
   const [error, setError] = useState("");
   const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
   const [modeHydrated, setModeHydrated] = useState(false);
@@ -239,7 +298,9 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   useEffect(() => {
     if (initialViewer.authenticated) return;
     const hydrateTimer = window.setTimeout(() => {
-      setMessages(safeStoredMessages());
+      const conversation = safeStoredConversation();
+      setAllMessages(conversation.allMessages);
+      setActiveLeafId(conversation.activeLeafId);
       setGuestHydrated(true);
     }, 0);
     return () => window.clearTimeout(hydrateTimer);
@@ -247,17 +308,23 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
 
   useEffect(() => {
     if (initialViewer.authenticated || !guestHydrated) return;
-    localStorage.setItem(WIDGET_GUEST_MESSAGES_KEY, JSON.stringify(persistableMessages(messages)));
-  }, [guestHydrated, initialViewer.authenticated, messages]);
+    localStorage.setItem(WIDGET_GUEST_MESSAGES_KEY, JSON.stringify({
+      allMessages: persistableMessages(allMessages),
+      activeLeafId,
+    }));
+  }, [activeLeafId, allMessages, guestHydrated, initialViewer.authenticated]);
 
   useEffect(() => {
-    try {
-      setMode(normalizeChatMode(localStorage.getItem(WIDGET_CHAT_MODE_KEY)));
-    } catch {
-      // Storage access can be unavailable in embedded, privacy-restricted contexts.
-    } finally {
-      setModeHydrated(true);
-    }
+    const hydrateTimer = window.setTimeout(() => {
+      try {
+        setMode(normalizeChatMode(localStorage.getItem(WIDGET_CHAT_MODE_KEY)));
+      } catch {
+        // Storage access can be unavailable in embedded, privacy-restricted contexts.
+      } finally {
+        setModeHydrated(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(hydrateTimer);
   }, []);
 
   useEffect(() => {
@@ -296,21 +363,26 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     event?.preventDefault();
     const text = input.trim();
     const selectedAttachments = attachments;
-    if ((!text && !selectedAttachments.length) || pending || attachmentPreparing) return;
+    if ((!text && !selectedAttachments.length) || pending || branchSwitching || attachmentPreparing) return;
     if (!initialViewer.authenticated && remaining === 0) {
       setError("Your 10 guest messages are used. Sign in to keep going.");
       return;
     }
 
     const baseMessages = messages;
+    const baseAllMessages = allMessages;
+    const baseActiveLeafId = activeLeafId;
+    const parentMessageId = baseMessages.at(-1)?.id ?? null;
     const optimisticMessage: ChatMessage = {
       id: localId(),
       role: "user",
       content: text,
       createdAt: new Date().toISOString(),
+      parentId: parentMessageId,
       ...(selectedAttachments.length ? { attachments: selectedAttachments } : {}),
     };
-    setMessages([...baseMessages, optimisticMessage]);
+    setAllMessages([...baseAllMessages, optimisticMessage]);
+    setActiveLeafId(optimisticMessage.id);
     setInput("");
     setAttachments([]);
     setError("");
@@ -325,6 +397,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
           threadId,
           message: text || undefined,
           attachments: attachmentPayload(selectedAttachments),
+          parentMessageId,
           mode,
           history: initialViewer.authenticated
             ? undefined
@@ -343,11 +416,13 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
       }
       if (!payload.userMessage) throw new Error("The message could not be sent.");
 
-      setMessages([...baseMessages, payload.userMessage, payload.message]);
+      setAllMessages(normalizeMessageGraph([...baseAllMessages, payload.userMessage, payload.message]));
+      setActiveLeafId(payload.activeLeafId ?? payload.message.id);
       setThreadId(payload.threadId);
       setRemaining(payload.remainingGuestMessages);
     } catch (caught) {
-      setMessages(baseMessages);
+      setAllMessages(baseAllMessages);
+      setActiveLeafId(baseActiveLeafId);
       setInput(text);
       setAttachments(selectedAttachments);
       setError(caught instanceof Error ? caught.message : "Something broke. Try that again.");
@@ -358,7 +433,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   };
 
   const chooseAttachments = async (files: FileList | null) => {
-    if (!files?.length || pending || attachmentPreparing) return;
+    if (!files?.length || pending || branchSwitching || attachmentPreparing) return;
     const selectedFiles = Array.from(files);
     if (fileInputRef.current) fileInputRef.current.value = "";
     setAttachmentPreparing(true);
@@ -380,15 +455,17 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   };
 
   const regenerateWithSearch = async (message: ChatMessage, index: number) => {
-    if (pending) return;
+    if (pending || branchSwitching) return;
     if (!initialViewer.authenticated && remaining === 0) {
       setError("Your 10 guest messages are used. Sign in to keep going.");
       return;
     }
 
-    const originalMessages = messages;
+    const originalAllMessages = allMessages;
+    const originalActiveLeafId = activeLeafId;
     const baseMessages = messages.slice(0, index);
-    setMessages(baseMessages);
+    const parentMessageId = message.parentId ?? baseMessages.at(-1)?.id ?? null;
+    setActiveLeafId(baseMessages.at(-1)?.id ?? null);
     setError("");
     setPending(true);
 
@@ -402,6 +479,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             ? undefined
             : guestHistoryPayload(baseMessages),
           regenerateFromMessageId: message.id,
+          parentMessageId,
           useSearch: true,
           mode,
         }),
@@ -411,14 +489,48 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
         if (response.status === 429) setRemaining(0);
         throw new Error(typeof payload.message === "string" ? payload.message : "No answer arrived.");
       }
-      setMessages([...baseMessages, payload.message]);
+      setAllMessages(normalizeMessageGraph([...originalAllMessages, payload.message]));
+      setActiveLeafId(payload.activeLeafId ?? payload.message.id);
       setThreadId(payload.threadId);
       setRemaining(payload.remainingGuestMessages);
     } catch (caught) {
-      setMessages(originalMessages);
+      setAllMessages(originalAllMessages);
+      setActiveLeafId(originalActiveLeafId);
       setError(caught instanceof Error ? caught.message : "Something broke. Try that again.");
     } finally {
       setPending(false);
+    }
+  };
+
+  const selectMessageVersion = async (messageId: string) => {
+    if (pending || branchSwitching) return;
+    const previousLeafId = activeLeafId;
+    const nextLeafId = newestLeafForBranch(allMessages, messageId);
+    if (!nextLeafId || nextLeafId === previousLeafId) return;
+    setActiveLeafId(nextLeafId);
+    setError("");
+
+    if (!initialViewer.authenticated || !threadId) return;
+
+    setBranchSwitching(true);
+    try {
+      const response = await fetch(`/api/threads/${threadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeMessageId: messageId }),
+      });
+      const payload = await readJsonResponse<{ thread?: ChatThread; message?: string }>(response);
+      if (!response.ok || !payload.thread) {
+        throw new Error(payload.message ?? "That answer version could not be selected.");
+      }
+      const nextAllMessages = normalizeMessageGraph(payload.thread.allMessages ?? payload.thread.messages ?? []);
+      setAllMessages(nextAllMessages);
+      setActiveLeafId(payload.thread.activeLeafId ?? nextAllMessages.at(-1)?.id ?? null);
+    } catch (caught) {
+      setActiveLeafId(previousLeafId);
+      setError(caught instanceof Error ? caught.message : "That answer version could not be selected.");
+    } finally {
+      setBranchSwitching(false);
     }
   };
 
@@ -523,12 +635,18 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
               </div>
               <div className="widget-answer-actions">
+                <WidgetVersionNavigation
+                  messages={allMessages}
+                  message={message}
+                  disabled={pending || branchSwitching}
+                  onSelect={(messageId) => void selectMessageVersion(messageId)}
+                />
                 <CopyAnswer content={message.content} />
                 <button
                   className="widget-search-answer"
                   type="button"
                   onClick={() => void regenerateWithSearch(message, index)}
-                  disabled={pending}
+                  disabled={pending || branchSwitching}
                   aria-label="Search the web"
                   title="Search the web"
                 >
@@ -587,14 +705,14 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             onKeyDown={onComposerKeyDown}
             placeholder={guestBlocked ? "Sign in to keep chatting" : "Ask me anything…"}
             aria-label="Message Busted Minds AI"
-            disabled={pending || guestBlocked}
+            disabled={pending || branchSwitching || guestBlocked}
           />
           <div className="widget-composer-bottom">
             <button
               className="widget-attachment-button"
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={pending || attachmentPreparing || guestBlocked || attachments.length >= MAX_CHAT_ATTACHMENTS}
+              disabled={pending || branchSwitching || attachmentPreparing || guestBlocked || attachments.length >= MAX_CHAT_ATTACHMENTS}
               aria-label="Attach files"
               title={initialViewer.authenticated ? "Attach up to 3 images or documents" : "Attach up to 3 images; sign in for documents"}
             >
@@ -603,12 +721,12 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             <WidgetModePicker
               mode={mode}
               onChange={setMode}
-              disabled={pending || attachmentPreparing || guestBlocked}
+              disabled={pending || branchSwitching || attachmentPreparing || guestBlocked}
             />
             <button
               className="widget-send-button"
               type="submit"
-              disabled={(!input.trim() && !attachments.length) || pending || attachmentPreparing || guestBlocked}
+              disabled={(!input.trim() && !attachments.length) || pending || branchSwitching || attachmentPreparing || guestBlocked}
               aria-label="Send message"
             >
               <SendHorizontal size={17} />

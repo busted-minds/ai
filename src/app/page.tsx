@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ChatShell } from "@/components/chat-shell";
 import { loadViewer } from "@/lib/auth/viewer";
-import { loadThreadMessages } from "@/lib/chat-data";
+import { loadThreadConversation } from "@/lib/chat-data";
 import { isUuid } from "@/lib/chat-projects";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ChatThread } from "@/lib/types";
@@ -61,17 +61,18 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     const supabase = await createSupabaseServerClient();
     const { data: thread } = await supabase
       .from("chat_threads")
-      .select("id,title,project_id,updated_at")
+      .select("id,title,project_id,active_leaf_id,updated_at")
       .eq("id", requestedThreadId)
       .maybeSingle();
     if (thread) {
       try {
+        const conversation = await loadThreadConversation(supabase, thread.id, thread.active_leaf_id);
         initialThread = {
           id: thread.id,
           title: thread.title,
           projectId: thread.project_id,
           updatedAt: thread.updated_at,
-          messages: await loadThreadMessages(supabase, thread.id),
+          ...conversation,
         };
       } catch {
         initialThread = null;

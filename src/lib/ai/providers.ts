@@ -457,3 +457,7 @@ export async function generateAnswer(
 export function getInferenceTelemetry() {
   return inferenceTracker.snapshot();
 }
+
+export function getInferenceAvailability(models: readonly ModelSpec[]) {
+  return inferenceTracker.catalogAvailability(models);
+}
