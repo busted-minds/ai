@@ -414,7 +414,15 @@ function RegenerateMenu({
               <small>{selectedMode.label} mode</small>
             </span>
           </button>
-          {mode !== "expert" && (
+          {mode === "expert" ? (
+            <button className="regenerate-menu-option" type="button" onClick={() => run(undefined, "auto")}>
+              <Sparkles size={19} />
+              <span>
+                <strong>Use Auto mode</strong>
+                <small>Balance speed and depth automatically</small>
+              </span>
+            </button>
+          ) : (
             <button className="regenerate-menu-option" type="button" onClick={() => run(undefined, "expert")}>
               <BrainCircuit size={19} />
               <span>
