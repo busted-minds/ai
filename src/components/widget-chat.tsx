@@ -16,6 +16,7 @@ import {
   LogIn,
   Globe,
   Paperclip,
+  RefreshCw,
   SendHorizontal,
   Sparkles,
   X,
@@ -156,7 +157,6 @@ function CopyAnswer({ content }: { content: string }) {
   return (
     <button className="widget-copy" type="button" onClick={copy} aria-label="Copy answer">
       {copied ? <Check size={13} /> : <Copy size={13} />}
-      <span>{copied ? "Copied" : "Copy"}</span>
     </button>
   );
 }
@@ -454,7 +454,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     if (attachment) await removePendingDocumentAttachments([attachment]);
   };
 
-  const regenerateWithSearch = async (message: ChatMessage, index: number) => {
+  const regenerate = async (message: ChatMessage, index: number, useSearch = false) => {
     if (pending || branchSwitching) return;
     if (!initialViewer.authenticated && remaining === 0) {
       setError("Your 10 guest messages are used. Sign in to keep going.");
@@ -480,7 +480,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             : guestHistoryPayload(baseMessages),
           regenerateFromMessageId: message.id,
           parentMessageId,
-          useSearch: true,
+          useSearch,
           mode,
         }),
       });
@@ -643,15 +643,24 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
                 />
                 <CopyAnswer content={message.content} />
                 <button
+                  className="widget-regenerate"
+                  type="button"
+                  onClick={() => void regenerate(message, index)}
+                  disabled={pending || branchSwitching}
+                  aria-label="Regenerate answer"
+                  title="Regenerate answer"
+                >
+                  <RefreshCw size={13} />
+                </button>
+                <button
                   className="widget-search-answer"
                   type="button"
-                  onClick={() => void regenerateWithSearch(message, index)}
+                  onClick={() => void regenerate(message, index, true)}
                   disabled={pending || branchSwitching}
                   aria-label="Search the web"
                   title="Search the web"
                 >
                   <Globe size={13} />
-                  <span>Search</span>
                 </button>
               </div>
             </article>

@@ -557,8 +557,12 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [threadMenuSource, setThreadMenuSource] = useState<"sidebar" | "header">("sidebar");
-  const [threadMenuPosition, setThreadMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [threadMenuPosition, setThreadMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [projectSubmenuOpen, setProjectSubmenuOpen] = useState(false);
+  const [projectSubmenuLayout, setProjectSubmenuLayout] = useState<{
+    side: "left" | "right";
+    width: number;
+  }>({ side: "right", width: 220 });
   const [threadToMoveAfterProjectCreation, setThreadToMoveAfterProjectCreation] = useState<string | null>(null);
   const [filesPanelOpen, setFilesPanelOpen] = useState(false);
   const [pinnedThreadIds, setPinnedThreadIds] = useState<Set<string>>(() => new Set());
@@ -736,7 +740,11 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
         Math.max(8, bounds.left),
         Math.max(8, window.innerWidth - bounds.width - 8),
       );
-      setThreadMenuPosition({ top: nextTop, left: nextLeft });
+      setThreadMenuPosition((current) => current ? {
+        ...current,
+        top: nextTop,
+        left: nextLeft,
+      } : current);
       menu.querySelector<HTMLButtonElement>("[role='menuitem']")?.focus();
     }, 0);
 
@@ -904,7 +912,6 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     if (pending) return;
     if (isPrivateChat) {
       newChat();
-      setThreadActionNotice("Private chat discarded. Back to a saved chat.");
       return;
     }
 
@@ -927,7 +934,6 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     setFilesPanelOpen(false);
     setMode(defaultMode);
     setSidebarOpen(false);
-    setThreadActionNotice("Private chat started. It will not appear in history or be shareable.");
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
@@ -1460,17 +1466,46 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       return;
     }
     const triggerBounds = trigger.getBoundingClientRect();
-    const menuWidth = 232;
-    const opensRight = window.innerWidth - triggerBounds.right >= menuWidth + 16;
+    const viewportWidth = window.innerWidth;
+    const edgeGap = 8;
+    const submenuGap = 9;
+    const isNarrowViewport = viewportWidth <= 640;
+    const menuWidth = isNarrowViewport
+      ? Math.min(232, Math.max(144, Math.floor(viewportWidth * 0.58)), viewportWidth - edgeGap * 2)
+      : 232;
+    const opensRight = viewportWidth - triggerBounds.right >= menuWidth + edgeGap * 2;
+    const proposedLeft = isNarrowViewport
+      ? source === "header" ? viewportWidth - menuWidth - edgeGap : edgeGap
+      : source === "header"
+        ? triggerBounds.right - menuWidth
+        : opensRight ? triggerBounds.right + edgeGap : triggerBounds.right - menuWidth;
+    const menuLeft = Math.min(
+      Math.max(edgeGap, proposedLeft),
+      Math.max(edgeGap, viewportWidth - menuWidth - edgeGap),
+    );
+    const sideSpace = {
+      left: Math.max(0, menuLeft - submenuGap - edgeGap),
+      right: Math.max(0, viewportWidth - (menuLeft + menuWidth) - submenuGap - edgeGap),
+    };
+    const preferredSide = source === "header" ? "left" : "right";
+    const submenuSide = sideSpace[preferredSide] >= 220 || sideSpace[preferredSide] >= sideSpace[preferredSide === "left" ? "right" : "left"]
+      ? preferredSide
+      : preferredSide === "left" ? "right" : "left";
     threadMenuTriggerRef.current = trigger;
     setThreadMenuSource(source);
     setProjectSubmenuOpen(false);
+    setProjectSubmenuLayout({
+      side: submenuSide,
+      width: Math.min(220, sideSpace[submenuSide]),
+    });
     setThreadMenuPosition(source === "header" ? {
       top: triggerBounds.bottom + 8,
-      left: Math.max(8, triggerBounds.right - menuWidth),
+      left: menuLeft,
+      width: menuWidth,
     } : {
       top: triggerBounds.top - 5,
-      left: opensRight ? triggerBounds.right + 8 : triggerBounds.right - menuWidth,
+      left: menuLeft,
+      width: menuWidth,
     });
     setThreadMenuId(thread.id);
   };
@@ -1513,7 +1548,9 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   const renderMoveToProjectSubmenu = (thread: ChatThread) => (
     <div
       className="thread-project-submenu-anchor"
-      onPointerEnter={() => setProjectSubmenuOpen(true)}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") setProjectSubmenuOpen(true);
+      }}
     >
       <button
         ref={projectSubmenuTriggerRef}
@@ -1538,12 +1575,13 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       {projectSubmenuOpen && (
         <div
           id={`thread-projects-${thread.id}`}
-          className={threadMenuSource === "header"
+          className={projectSubmenuLayout.side === "left"
             ? "thread-project-submenu opens-left"
             : "thread-project-submenu opens-right"}
           ref={projectSubmenuRef}
           role="menu"
           aria-label="Choose a project"
+          style={{ width: projectSubmenuLayout.width }}
           onKeyDown={(event) => {
             if (event.key === "Escape" || event.key === "ArrowLeft") {
               event.preventDefault();
@@ -1688,36 +1726,17 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                 {visibleProjects.map((project) => {
                   const projectThreads = projectThreadsFor(project);
                   const collapsed = collapsedProjectIds.includes(project.id);
+                  const editing = editingProjectId === project.id;
                   return (
                     <div className="project-group" key={project.id}>
-                      <div className={currentProject?.id === project.id ? "project-row active" : "project-row"}>
-                        <button type="button" onClick={() => toggleProject(project.id)} aria-expanded={!collapsed}>
-                          <span className="project-chevron">
-                            {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                      {editing ? (
+                        <form className="project-name-form is-inline" onSubmit={(event) => void submitProjectRename(event, project.id)}>
+                          <span className="project-rename-icons" aria-hidden>
+                            <span className="project-chevron">
+                              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            </span>
+                            <Folder size={17} />
                           </span>
-                          <Folder size={17} />
-                          <span>{project.name}</span>
-                        </button>
-                        <button type="button" onClick={() => newChat(project.id)} aria-label={`New conversation in ${project.name}`} title="New conversation">
-                          <Plus size={16} />
-                        </button>
-                        <button
-                          className="project-more"
-                          type="button"
-                          onClick={() => {
-                            setThreadMenuId(null);
-                            setProjectMenuId((current) => current === project.id ? null : project.id);
-                          }}
-                          aria-label={`Manage ${project.name}`}
-                          aria-expanded={projectMenuId === project.id}
-                        >
-                          <MoreHorizontal size={16} />
-                        </button>
-                      </div>
-
-                      {editingProjectId === project.id && (
-                        <form className="project-name-form is-nested" onSubmit={(event) => void submitProjectRename(event, project.id)}>
-                          <Folder size={15} aria-hidden />
                           <input
                             ref={projectNameInputRef}
                             value={projectNameDraft}
@@ -1734,6 +1753,31 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                             <X size={14} />
                           </button>
                         </form>
+                      ) : (
+                        <div className={currentProject?.id === project.id ? "project-row active" : "project-row"}>
+                          <button type="button" onClick={() => toggleProject(project.id)} aria-expanded={!collapsed}>
+                            <span className="project-chevron">
+                              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            </span>
+                            <Folder size={17} />
+                            <span>{project.name}</span>
+                          </button>
+                          <button type="button" onClick={() => newChat(project.id)} aria-label={`New conversation in ${project.name}`} title="New conversation">
+                            <Plus size={16} />
+                          </button>
+                          <button
+                            className="project-more"
+                            type="button"
+                            onClick={() => {
+                              setThreadMenuId(null);
+                              setProjectMenuId((current) => current === project.id ? null : project.id);
+                            }}
+                            aria-label={`Manage ${project.name}`}
+                            aria-expanded={projectMenuId === project.id}
+                          >
+                            <MoreHorizontal size={16} />
+                          </button>
+                        </div>
                       )}
 
                       {projectMenuId === project.id && (
@@ -2266,7 +2310,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
           ref={threadMenuRef}
           role="menu"
           aria-label={`Actions for ${menuThread.title}`}
-          style={{ top: threadMenuPosition.top, left: threadMenuPosition.left }}
+          style={{ top: threadMenuPosition.top, left: threadMenuPosition.left, width: threadMenuPosition.width }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
@@ -2292,7 +2336,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
         >
           {menuThread.archived ? (
             <>
-              {threadMenuSource === "header" && (
+              {threadMenuSource === "header" && chatFileCount > 0 && (
                 <button type="button" role="menuitem" onClick={() => {
                   setThreadMenuId(null);
                   setProjectSubmenuOpen(false);
@@ -2310,13 +2354,15 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             </>
           ) : threadMenuSource === "header" ? (
             <>
-              <button type="button" role="menuitem" onClick={() => {
-                setThreadMenuId(null);
-                setProjectSubmenuOpen(false);
-                setFilesPanelOpen(true);
-              }}>
-                <Files size={18} /><span>View files in chat</span>
-              </button>
+              {chatFileCount > 0 && (
+                <button type="button" role="menuitem" onClick={() => {
+                  setThreadMenuId(null);
+                  setProjectSubmenuOpen(false);
+                  setFilesPanelOpen(true);
+                }}>
+                  <Files size={18} /><span>View files in chat</span>
+                </button>
+              )}
               <button type="button" role="menuitem" onClick={() => togglePinnedThread(menuThread.id)}>
                 <Pin size={18} /><span>{pinnedThreadIds.has(menuThread.id) ? "Unpin Chat" : "Pin Chat"}</span>
               </button>
