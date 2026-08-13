@@ -31,11 +31,14 @@ export function messageFromRow(row: MessageRow): ChatMessage {
   };
 }
 
-export async function listThreads(supabase: SupabaseClient): Promise<ChatThread[]> {
+async function listThreadsByArchiveState(
+  supabase: SupabaseClient,
+  archived: boolean,
+): Promise<ChatThread[]> {
   const { data, error } = await supabase
     .from("chat_threads")
-    .select("id,title,project_id,updated_at")
-    .eq("archived", false)
+    .select("id,title,project_id,archived,updated_at")
+    .eq("archived", archived)
     .order("updated_at", { ascending: false })
     .limit(100);
   if (error) throw error;
@@ -43,8 +46,17 @@ export async function listThreads(supabase: SupabaseClient): Promise<ChatThread[
     id: row.id as string,
     title: row.title as string,
     projectId: row.project_id as string | null,
+    archived: row.archived as boolean,
     updatedAt: row.updated_at as string,
   }));
+}
+
+export async function listThreads(supabase: SupabaseClient): Promise<ChatThread[]> {
+  return listThreadsByArchiveState(supabase, false);
+}
+
+export async function listArchivedThreads(supabase: SupabaseClient): Promise<ChatThread[]> {
+  return listThreadsByArchiveState(supabase, true);
 }
 
 export async function listProjects(supabase: SupabaseClient): Promise<ChatProject[]> {

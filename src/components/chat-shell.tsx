@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   Archive,
+  ArchiveRestore,
   ArrowUpRight,
   BrainCircuit,
   Check,
@@ -548,6 +549,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   const [search, setSearch] = useState("");
   const [projectsCollapsed, setProjectsCollapsed] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>([]);
   const [creatingProject, setCreatingProject] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -658,8 +660,11 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
         .then(async ([threadsResult, projectsResult]) => {
           let unavailable = false;
           if (threadsResult.status === "fulfilled" && threadsResult.value.ok) {
-            const payload = await threadsResult.value.json() as { threads?: ChatThread[] };
-            setThreads(payload.threads ?? []);
+            const payload = await threadsResult.value.json() as {
+              threads?: ChatThread[];
+              archivedThreads?: ChatThread[];
+            };
+            setThreads([...(payload.threads ?? []), ...(payload.archivedThreads ?? [])]);
           } else {
             unavailable = true;
           }
@@ -786,15 +791,21 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
     };
   }, [profileMenuOpen]);
 
+  const activeThreads = useMemo(() => threads.filter((thread) => !thread.archived), [threads]);
   const filteredThreads = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const visibleThreads = threads.filter((thread) => !thread.archived);
     const matchingThreads = query
-      ? visibleThreads.filter((thread) => thread.title.toLowerCase().includes(query))
-      : visibleThreads;
+      ? activeThreads.filter((thread) => thread.title.toLowerCase().includes(query))
+      : activeThreads;
     return [...matchingThreads].sort((first, second) =>
       Number(pinnedThreadIds.has(second.id)) - Number(pinnedThreadIds.has(first.id)));
-  }, [pinnedThreadIds, search, threads]);
+  }, [activeThreads, pinnedThreadIds, search]);
+  const archivedThreads = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return threads.filter((thread) => (
+      thread.archived && (!query || thread.title.toLowerCase().includes(query))
+    ));
+  }, [search, threads]);
 
   const currentThread = threads.find((thread) => thread.id === currentThreadId) ?? null;
   const menuThread = threadMenuId ? threads.find((thread) => thread.id === threadMenuId) ?? null : null;
@@ -804,7 +815,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       : []
   )), [messages]);
   const chatFileCount = chatFileGroups.reduce((count, group) => count + group.attachments.length, 0);
-  const currentProject = projects.find((project) => (
+  const currentProject = currentThread?.archived ? null : projects.find((project) => (
     project.id === (currentThread?.projectId ?? activeProjectId)
   )) ?? null;
   const projectIds = useMemo(() => new Set(projects.map(({ id }) => id)), [projects]);
@@ -921,17 +932,21 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   };
 
   const deleteThread = async (threadId: string) => {
+    const thread = threads.find((item) => item.id === threadId);
+    if (!thread || !window.confirm(`Delete “${thread.title}”? This cannot be undone.`)) return;
+    setThreadMenuId(null);
+    setError("");
     if (viewer.authenticated) {
       const response = await fetch(`/api/threads/${threadId}`, { method: "DELETE" });
       if (!response.ok) return setError("That thread refused to disappear. Dramatic.");
     }
-    setThreadMenuId(null);
     updateThreads((current) => current.filter((thread) => thread.id !== threadId));
     updatePinnedThreads((current) => {
       current.delete(threadId);
       return current;
     });
     if (currentThreadId === threadId) newChat();
+    setThreadActionNotice("Conversation deleted.");
   };
 
   const submitProject = async (event: FormEvent<HTMLFormElement>) => {
@@ -1118,12 +1133,10 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
         });
         const payload = await readJsonResponse<{ message?: string }>(response);
         if (!response.ok) throw new Error(payload.message ?? "Conversation could not be archived.");
-        updateThreads((current) => current.filter((thread) => thread.id !== threadId));
-      } else {
-        updateThreads((current) => current.map((thread) => (
-          thread.id === threadId ? { ...thread, archived: true } : thread
-        )));
       }
+      updateThreads((current) => current.map((thread) => (
+        thread.id === threadId ? { ...thread, archived: true } : thread
+      )));
       updatePinnedThreads((current) => {
         current.delete(threadId);
         return current;
@@ -1132,6 +1145,28 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
       setThreadActionNotice("Conversation archived.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Conversation could not be archived.");
+    }
+  };
+
+  const unarchiveThread = async (threadId: string) => {
+    setThreadMenuId(null);
+    setError("");
+    try {
+      if (viewer.authenticated) {
+        const response = await fetch(`/api/threads/${threadId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived: false }),
+        });
+        const payload = await readJsonResponse<{ message?: string }>(response);
+        if (!response.ok) throw new Error(payload.message ?? "Conversation could not be unarchived.");
+      }
+      updateThreads((current) => current.map((thread) => (
+        thread.id === threadId ? { ...thread, archived: false } : thread
+      )));
+      setThreadActionNotice("Conversation restored to history.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Conversation could not be unarchived.");
     }
   };
 
@@ -1444,14 +1479,14 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
   const projectThreadsFor = (project: ChatProject) => {
     const projectNameMatches = search.trim()
       && project.name.toLowerCase().includes(search.trim().toLowerCase());
-    return (projectNameMatches ? threads : filteredThreads)
+    return (projectNameMatches ? activeThreads : filteredThreads)
       .filter((thread) => thread.projectId === project.id);
   };
   const renderThreadRow = (thread: ChatThread, nested = false) => (
     <div className={nested ? "thread-item-wrap is-nested" : "thread-item-wrap"} key={thread.id}>
       <div className={thread.id === currentThreadId ? "thread-row active" : "thread-row"}>
         <button type="button" onClick={() => void selectThread(thread)}>
-          <MessageSquareText size={15} /> <span>{thread.title}</span>
+          {thread.archived ? <Archive size={15} /> : <MessageSquareText size={15} />} <span>{thread.title}</span>
         </button>
         {pinnedThreadIds.has(thread.id) && (
           <span className="thread-pinned-indicator" title="Pinned conversation">
@@ -1767,9 +1802,36 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                 ) : historyThreads.length ? historyThreads.map((thread) => renderThreadRow(thread)) : (!search || !visibleProjects.length) ? (
                   <div className="empty-threads">
                     <BustedBulbMark size={17} />
-                    <p>{search ? "No conversation matches that." : threads.length ? "No ungrouped conversations." : "Your next dangerous idea starts here."}</p>
+                    <p>{search ? "No active conversation matches that." : activeThreads.length ? "No ungrouped conversations." : "Your next dangerous idea starts here."}</p>
                   </div>
                 ) : null}
+              </div>
+            )}
+          </section>
+
+          <section className="sidebar-conversation-section archived-section" aria-labelledby="archived-heading">
+            <div className="conversation-section-head">
+              <button
+                id="archived-heading"
+                className="conversation-section-toggle"
+                type="button"
+                onClick={() => setArchivedCollapsed((current) => !current)}
+                aria-expanded={!archivedCollapsed}
+              >
+                {archivedCollapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+                <Archive size={14} />
+                <span>Archived</span>
+                <small>{archivedThreads.length}</small>
+              </button>
+            </div>
+            {!archivedCollapsed && (
+              <div className="history-thread-list">
+                {archivedThreads.length ? archivedThreads.map((thread) => renderThreadRow(thread)) : (
+                  <div className="empty-threads">
+                    <Archive size={17} />
+                    <p>{search ? "No archived conversation matches that." : "Archived conversations will appear here."}</p>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -1928,7 +1990,9 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             <small>
               {isPrivateChat
                 ? <><HatGlasses size={10} /> Not saved to history</>
-                : currentProject
+                : currentThread?.archived
+                  ? <><Archive size={10} /> Archived</>
+                  : currentProject
                   ? <><Folder size={10} /> {currentProject.name}</>
                   : <><span /> Ready to think</>}
             </small>
@@ -2226,7 +2290,25 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             items[nextIndex]?.focus();
           }}
         >
-          {threadMenuSource === "header" ? (
+          {menuThread.archived ? (
+            <>
+              {threadMenuSource === "header" && (
+                <button type="button" role="menuitem" onClick={() => {
+                  setThreadMenuId(null);
+                  setProjectSubmenuOpen(false);
+                  setFilesPanelOpen(true);
+                }}>
+                  <Files size={18} /><span>View files in chat</span>
+                </button>
+              )}
+              <button type="button" role="menuitem" onClick={() => void unarchiveThread(menuThread.id)}>
+                <ArchiveRestore size={18} /><span>Unarchive</span>
+              </button>
+              <button className="danger" type="button" role="menuitem" onClick={() => void deleteThread(menuThread.id)}>
+                <Trash2 size={18} /><span>Delete permanently</span>
+              </button>
+            </>
+          ) : threadMenuSource === "header" ? (
             <>
               <button type="button" role="menuitem" onClick={() => {
                 setThreadMenuId(null);
@@ -2245,11 +2327,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                 className="danger"
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  if (window.confirm(`Delete “${menuThread.title}”? This cannot be undone.`)) {
-                    void deleteThread(menuThread.id);
-                  }
-                }}
+                onClick={() => void deleteThread(menuThread.id)}
               >
                 <Trash2 size={18} /><span>Delete</span>
               </button>

@@ -18,7 +18,7 @@ export async function GET(_request: Request, context: RouteContext) {
   if (!user) return NextResponse.json({ message: "Sign in required." }, { status: 401 });
   const { data: thread } = await supabase
     .from("chat_threads")
-    .select("id,title,project_id,active_leaf_id,updated_at")
+    .select("id,title,project_id,active_leaf_id,archived,updated_at")
     .eq("id", id)
     .maybeSingle();
   if (!thread) return NextResponse.json({ message: "Conversation not found." }, { status: 404 });
@@ -29,6 +29,7 @@ export async function GET(_request: Request, context: RouteContext) {
         id: thread.id,
         title: thread.title,
         projectId: thread.project_id,
+        archived: thread.archived,
         updatedAt: thread.updated_at,
         ...conversation,
       },
