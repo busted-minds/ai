@@ -10,7 +10,7 @@ A responsive, production-oriented multimodal AI chat app with a private six-prov
 
 All inference keys and Supabase secret keys are read only by server routes. Never add `NEXT_PUBLIC_` to a secret.
 
-Inference uses an adaptive, zero-cost six-provider registry. Authenticated provider catalogs are refreshed every 15 minutes, filtered to free text/vision chat models, and routed by capability, quality, latency, recent health, and observed quota. Slow requests are hedged across different providers, while provider/model cooldowns prevent repeated calls to exhausted or incompatible endpoints. Set `AI_MODEL_CATALOG_TTL_MS` to change the refresh interval.
+Inference uses an adaptive, zero-cost six-provider registry. Authenticated provider catalogs are refreshed every 15 minutes and filtered to free text/vision chat models. Reviewed Fast/Expert preference lists provide a stable base order for general, code, reasoning, multilingual, and vision requests; live capability, context, latency, health, and quota data adjust that order. Runtime health is synchronized through a service-role-only Supabase state table so serverless instances share cooldowns and observed performance, with an in-process fallback if synchronization is unavailable. Slow requests are hedged across different providers. Set `AI_MODEL_CATALOG_TTL_MS`, `AI_SHARED_STATE_SYNC_MS`, and `AI_SHARED_STATE_TIMEOUT_MS` to tune refresh and synchronization timing.
 
 For a protected operational snapshot, set a long random `AI_HEALTH_TOKEN` and request `GET /api/ai/health` with `Authorization: Bearer <token>`. Add `?refresh=1` to force an authenticated catalog refresh. The endpoint is disabled with a 404 when the token is unset and never returns API keys, prompts, or responses.
 

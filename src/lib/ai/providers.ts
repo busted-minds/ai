@@ -1,12 +1,15 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { searchDuckDuckGo, shouldUseDuckDuckGo } from "./duckduckgo";
 import {
+  assessInferenceComplexity,
   DEFAULT_CHAT_MODE,
   normalizeChatMode,
   resolveInferenceTier,
   type ChatMode,
 } from "./modes";
 import { inferenceTracker, type InferenceFailure } from "./inference-state";
+import { sharedInferenceRuntime } from "./inference-shared-state";
 import { getFreeModelCatalog } from "./model-registry";
 import type { ModelSpec } from "./model-pools";
 
@@ -242,6 +245,16 @@ type RunningAttempt = {
   cancel: () => void;
 };
 
+type AttemptTrace = {
+  routeId: string;
+  wave: number;
+  role: "primary" | "fallback" | "hedge";
+};
+
+function logRoutingEvent(event: string, detail: Record<string, unknown>): void {
+  console.info("[ai-routing]", JSON.stringify({ event, ...detail }));
+}
+
 function inferenceFailure(caught: unknown, timedOut: boolean): InferenceFailure {
   if (caught instanceof InferenceUpstreamError) {
     return {
@@ -259,6 +272,7 @@ function startAttempt(
   messages: InferenceMessage[],
   systemPrompt: string,
   deadline: number,
+  trace: AttemptTrace,
 ): RunningAttempt {
   const controller = new AbortController();
   const startedAt = Date.now();
@@ -271,24 +285,76 @@ function startAttempt(
     controller.abort();
   }, timeoutMs);
   inferenceTracker.started(spec, startedAt);
+  logRoutingEvent("attempt-start", {
+    ...trace,
+    provider: spec.provider,
+    model: spec.model,
+  });
 
   const runner = {} as RunningAttempt;
   const attempt = executeModel(spec, apiKey, messages, controller.signal, systemPrompt)
     .then((result) => {
-      inferenceTracker.succeeded(spec, Date.now() - startedAt, result.headers);
+      const latencyMs = Date.now() - startedAt;
+      inferenceTracker.succeeded(spec, latencyMs, result.headers);
+      sharedInferenceRuntime.queue({
+        event: "success",
+        spec,
+        latencyMs,
+        status: "200",
+        state: inferenceTracker.sharedOutcomeState(spec),
+      });
+      logRoutingEvent("attempt-success", {
+        ...trace,
+        provider: spec.provider,
+        model: spec.model,
+        latencyMs,
+        sharedQueued: true,
+      });
       return result.content;
     })
     .catch((caught: unknown) => {
+      const latencyMs = Date.now() - startedAt;
       if (cancelRequested) {
         inferenceTracker.cancelled(spec);
+        sharedInferenceRuntime.queue({
+          event: "cancelled",
+          spec,
+          latencyMs,
+          status: "cancelled",
+          state: inferenceTracker.sharedOutcomeState(spec),
+        });
+        logRoutingEvent("attempt-cancelled", {
+          ...trace,
+          provider: spec.provider,
+          model: spec.model,
+          latencyMs,
+          sharedQueued: true,
+        });
         throw new CancelledHedgeError();
       }
+      const failure = inferenceFailure(caught, timedOut);
       inferenceTracker.failed(
         spec,
-        inferenceFailure(caught, timedOut),
-        Date.now() - startedAt,
+        failure,
+        latencyMs,
         caught instanceof InferenceUpstreamError ? caught.headers : undefined,
       );
+      const status = failure.status ? String(failure.status) : failure.timeout ? "timeout" : "network";
+      sharedInferenceRuntime.queue({
+        event: "failure",
+        spec,
+        latencyMs,
+        status,
+        state: inferenceTracker.sharedOutcomeState(spec),
+      });
+      logRoutingEvent("attempt-failure", {
+        ...trace,
+        provider: spec.provider,
+        model: spec.model,
+        latencyMs,
+        status,
+        sharedQueued: true,
+      });
       throw caught;
     })
     .finally(() => {
@@ -314,6 +380,7 @@ async function executeAdaptiveRoute(
   systemPrompt: string,
   deadline: number,
   tier: "fast" | "expert",
+  routeId: string,
 ): Promise<string> {
   let lastError: unknown = new Error("Every inference provider is temporarily unavailable.");
   for (let index = 0; index < candidates.length && deadline - Date.now() >= 2_000; index += 2) {
@@ -321,7 +388,12 @@ async function executeAdaptiveRoute(
     if (!primarySpec) break;
     const primaryKey = process.env[primarySpec.keyName];
     if (!primaryKey) continue;
-    const primary = startAttempt(primarySpec, primaryKey, messages, systemPrompt, deadline);
+    const wave = Math.floor(index / 2) + 1;
+    const primary = startAttempt(primarySpec, primaryKey, messages, systemPrompt, deadline, {
+      routeId,
+      wave,
+      role: "primary",
+    });
     const secondarySpec = candidates[index + 1];
     const secondaryKey = secondarySpec ? process.env[secondarySpec.keyName] : undefined;
     if (!secondarySpec || !secondaryKey) {
@@ -343,14 +415,22 @@ async function executeAdaptiveRoute(
       if (first.ok) return first.value;
       lastError = first.error;
       if (deadline - Date.now() < 2_000) continue;
-      const secondary = startAttempt(secondarySpec, secondaryKey, messages, systemPrompt, deadline);
+      const secondary = startAttempt(secondarySpec, secondaryKey, messages, systemPrompt, deadline, {
+        routeId,
+        wave,
+        role: "fallback",
+      });
       const outcome = await secondary.settled;
       if (outcome.ok) return outcome.value;
       lastError = outcome.error;
       continue;
     }
 
-    const secondary = startAttempt(secondarySpec, secondaryKey, messages, systemPrompt, deadline);
+    const secondary = startAttempt(secondarySpec, secondaryKey, messages, systemPrompt, deadline, {
+      routeId,
+      wave,
+      role: "hedge",
+    });
     const raced = await Promise.race([primary.settled, secondary.settled]);
     if (raced.ok) {
       (raced.runner === primary ? secondary : primary).cancel();
@@ -411,12 +491,29 @@ export async function generateAnswer(
 
   const deadline = Date.now() + 55_000;
   const catalogPromise = getFreeModelCatalog();
+  const sharedStatePromise = sharedInferenceRuntime.sync(inferenceTracker);
   const latest = conversation.at(-1);
   const latestUserMessage = latest?.content
     || (latest?.documentContext ? "Analyze the attached document." : "Analyze the attached image.");
   const mode = normalizeChatMode(options.mode ?? DEFAULT_CHAT_MODE);
-  const tier = resolveInferenceTier(mode, latestUserMessage);
   const hasImages = conversation.some((message) => Boolean(message.images?.length));
+  const hasDocuments = conversation.some((message) => Boolean(message.documentContext?.trim()));
+  const totalInputCharacters = conversation.reduce(
+    (total, message) => total + messageText(message).length,
+    0,
+  );
+  const complexityContext = {
+    conversationTurns: conversation.length,
+    totalInputCharacters,
+    hasImages,
+    hasDocuments,
+    priorUserPrompts: conversation
+      .slice(0, -1)
+      .filter((message) => message.role === "user")
+      .map((message) => message.content),
+  };
+  const complexity = assessInferenceComplexity(latestUserMessage, complexityContext);
+  const tier = resolveInferenceTier(mode, latestUserMessage, complexityContext);
   const wantsSearch = options.forceSearch || shouldUseDuckDuckGo(latestUserMessage);
   let systemPrompt = SYSTEM_PROMPT;
   if (options.customInstructions?.trim()) {
@@ -440,18 +537,43 @@ export async function generateAnswer(
   const catalog = await catalogPromise;
   const configured = catalog.providers.some((provider) => provider.configured);
   if (!configured) throw new Error("No inference providers are configured.");
+  const sharedStateLoaded = await sharedStatePromise;
   const estimatedInputTokens = Math.ceil(conversation.reduce((total, message) => (
     total + messageText(message).length + (message.images?.length ?? 0) * 1_024
   ), systemPrompt.length) / 4);
-  const candidates = inferenceTracker.select(catalog.models, {
+  const selection = inferenceTracker.selectDetailed(catalog.models, {
     tier,
     needsVision: hasImages,
     prompt: latestUserMessage,
     estimatedInputTokens,
     limit: 8,
   });
+  const candidates = selection.candidates;
   if (!candidates.length) throw new Error("Every compatible inference provider is cooling down.");
-  return executeAdaptiveRoute(candidates, conversation, systemPrompt, deadline, tier);
+  const routeId = randomUUID();
+  const scores = new Map(selection.ranked.map((candidate) => (
+    [`${candidate.provider}:${candidate.model}`, candidate.score]
+  )));
+  logRoutingEvent("decision", {
+    routeId,
+    requestedMode: mode,
+    resolvedTier: tier,
+    preference: selection.preference,
+    complexityScore: complexity.score,
+    complexitySignals: complexity.signals,
+    conversationTurns: conversation.length,
+    estimatedInputTokens,
+    needsVision: hasImages,
+    hasDocuments,
+    sharedStateLoaded,
+    explored: selection.explored,
+    candidates: candidates.map((candidate) => ({
+      provider: candidate.provider,
+      model: candidate.model,
+      score: scores.get(`${candidate.provider}:${candidate.model}`) ?? null,
+    })),
+  });
+  return executeAdaptiveRoute(candidates, conversation, systemPrompt, deadline, tier, routeId);
 }
 
 export function getInferenceTelemetry() {
@@ -460,4 +582,12 @@ export function getInferenceTelemetry() {
 
 export function getInferenceAvailability(models: readonly ModelSpec[]) {
   return inferenceTracker.catalogAvailability(models);
+}
+
+export function flushInferenceTelemetry(): Promise<void> {
+  return sharedInferenceRuntime.flush();
+}
+
+export function syncInferenceTelemetry(): Promise<boolean> {
+  return sharedInferenceRuntime.sync(inferenceTracker);
 }

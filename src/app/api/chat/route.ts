@@ -1,6 +1,11 @@
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
-import { generateAnswer, type InferenceImage, type InferenceMessage } from "@/lib/ai/providers";
+import { after, NextResponse } from "next/server";
+import {
+  flushInferenceTelemetry,
+  generateAnswer,
+  type InferenceImage,
+  type InferenceMessage,
+} from "@/lib/ai/providers";
 import { normalizeChatMode } from "@/lib/ai/modes";
 import { normalizeCustomInstructions } from "@/lib/chat-preferences";
 import { makeThreadTitle } from "@/lib/chat-data";
@@ -64,6 +69,15 @@ type StoredMessage = {
 };
 
 type ChatSupabaseClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+function scheduleInferenceTelemetryFlush(): void {
+  try {
+    after(() => flushInferenceTelemetry());
+  } catch {
+    // Direct route invocation in local tools/tests has no Next request context.
+    void flushInferenceTelemetry();
+  }
+}
 
 function inferenceImages(attachments: ValidatedImageAttachment[]): InferenceImage[] {
   return attachments.map(({ mimeType, base64 }) => ({ mimeType, base64 }));
@@ -452,6 +466,7 @@ export async function POST(request: Request) {
       customInstructions,
     });
   } catch {
+    scheduleInferenceTelemetryFlush();
     return NextResponse.json(
       { message: incomingAttachmentCount
           ? "The file-reading brain trust is temporarily unavailable. Try again in a moment."
@@ -459,6 +474,7 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
+  scheduleInferenceTelemetryFlush();
 
   const assistantCreatedAt = new Date().toISOString();
   const userCreatedAt = new Date(Date.parse(assistantCreatedAt) - 1).toISOString();

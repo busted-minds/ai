@@ -11,6 +11,7 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("@/lib/ai/providers", () => ({
+  flushInferenceTelemetry: vi.fn(async () => undefined),
   generateAnswer: mocks.generateAnswer,
 }));
 

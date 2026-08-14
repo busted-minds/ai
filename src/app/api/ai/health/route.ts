@@ -1,6 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getInferenceAvailability, getInferenceTelemetry } from "@/lib/ai/providers";
+import {
+  getInferenceAvailability,
+  getInferenceTelemetry,
+  syncInferenceTelemetry,
+} from "@/lib/ai/providers";
 import {
   forceModelCatalogRefresh,
   getFreeModelCatalog,
@@ -30,6 +34,7 @@ export async function GET(request: Request) {
   const catalog = refresh
     ? await forceModelCatalogRefresh()
     : await getFreeModelCatalog();
+  const sharedStateLoaded = await syncInferenceTelemetry();
   const telemetry = getInferenceTelemetry();
   const runtimeAvailability = getInferenceAvailability(catalog.models);
   const providers = catalog.providers.map((provider) => ({
@@ -57,6 +62,7 @@ export async function GET(request: Request) {
       providers,
     },
     telemetry,
+    sharedStateLoaded,
   }, {
     status: status === "operational" ? 200 : 503,
     headers: { "Cache-Control": "no-store" },

@@ -1,4 +1,5 @@
 import {
+  CURATED_MODEL_PROFILES,
   FALLBACK_MODELS,
   PROVIDER_BY_NAME,
   PROVIDER_DEFINITIONS,
@@ -129,15 +130,16 @@ function discoveredModel(
   const fallback = FALLBACK_MODELS.find((candidate) => (
     candidate.provider === provider && candidate.model === model
   ));
+  const curated = CURATED_MODEL_PROFILES[`${provider}:${model}`];
   return defineModel({
     provider,
     keyName: definition.keyName,
     model,
-    vision: options.vision ?? fallback?.vision ?? VISION_PATTERN.test(model),
-    quality: fallback?.quality ?? inferredQuality(model),
-    speed: fallback?.speed ?? inferredSpeed(model),
+    vision: options.vision ?? curated?.vision ?? fallback?.vision ?? VISION_PATTERN.test(model),
+    quality: curated?.quality ?? fallback?.quality ?? inferredQuality(model),
+    speed: curated?.speed ?? fallback?.speed ?? inferredSpeed(model),
     ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}),
-    specialties: fallback?.specialties ?? specialties(model),
+    specialties: curated?.specialties ?? fallback?.specialties ?? specialties(model),
     source: options.source ?? "catalog",
   });
 }

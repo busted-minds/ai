@@ -9,6 +9,7 @@ import { makeThreadTitle } from "@/lib/chat-data";
 import { safeNextPath } from "@/lib/security";
 import { duckDuckGoQuery, shouldUseDuckDuckGo } from "@/lib/ai/duckduckgo";
 import {
+  assessInferenceComplexity,
   DEFAULT_CHAT_MODE,
   normalizeChatMode,
   resolveInferenceTier,
@@ -192,6 +193,23 @@ describe("chat mode routing", () => {
     expect(resolveInferenceTier("auto", "Audit this security architecture and explain the trade-offs.")).toBe("expert");
     expect(resolveInferenceTier("expert", "Hello")).toBe("expert");
   });
+
+  it("uses conversation and attachment context for deterministic Auto routing", () => {
+    const followUpContext = {
+      conversationTurns: 4,
+      totalInputCharacters: 900,
+      priorUserPrompts: ["Design a secure authentication architecture with explicit trade-offs."],
+    };
+    expect(resolveInferenceTier("auto", "Apply that here.", followUpContext)).toBe("expert");
+    expect(assessInferenceComplexity("Summarize this.", {
+      hasDocuments: true,
+      totalInputCharacters: 8_000,
+    })).toMatchObject({ score: 3 });
+    expect(resolveInferenceTier("auto", "Thanks", {
+      conversationTurns: 3,
+      totalInputCharacters: 100,
+    })).toBe("fast");
+  });
 });
 
 describe("chat preferences", () => {
@@ -227,6 +245,21 @@ describe("free model registry", () => {
 
     expect(models.map(({ model }) => model)).toEqual(["gemini-3.6-flash"]);
     expect(models[0]).toMatchObject({ free: true, vision: true, contextWindow: 1_000_000 });
+  });
+
+  it("applies reviewed profiles before model-name inference", () => {
+    const [model] = parseProviderCatalog("google", {
+      models: [{
+        name: "models/gemini-3.5-flash",
+        supportedGenerationMethods: ["generateContent"],
+      }],
+    });
+
+    expect(model).toMatchObject({
+      quality: 9.3,
+      speed: 8.8,
+      specialties: ["general", "reasoning", "code"],
+    });
   });
 
   it("only admits zero-price OpenRouter text models and preserves vision metadata", () => {
@@ -348,6 +381,76 @@ describe("adaptive inference health", () => {
     expect(tracker.snapshot(1_000).models).toEqual([]);
   });
 
+  it("uses the curated Expert order ahead of GPT-OSS naming heuristics", () => {
+    const tracker = new InferenceTracker();
+    const expertModels = FALLBACK_MODELS.filter(({ id }) => [
+      "google:gemini-3.6-flash",
+      "groq:openai/gpt-oss-120b",
+      "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
+    ].includes(id));
+    const context = {
+      tier: "expert" as const,
+      needsVision: false,
+      prompt: "Debug this implementation and explain the architectural trade-offs.",
+      random: () => 0,
+      now: 1_000,
+    };
+
+    expect(tracker.select(expertModels, context)[0]?.id).toBe("google:gemini-3.6-flash");
+    expect(tracker.select(expertModels, context).map(({ id }) => id))
+      .toEqual(tracker.select(expertModels, context).map(({ id }) => id));
+  });
+
+  it("only explores explicitly near-tied candidates", () => {
+    const tracker = new InferenceTracker();
+    const googleFast = {
+      ...googleVision,
+      id: "google:example/fast",
+      model: "example/fast",
+      speed: groqFast.speed,
+    };
+    const selection = tracker.selectDetailed([googleFast, groqFast], {
+      tier: "fast",
+      needsVision: false,
+      prompt: "Hello",
+      explorationRate: 0.03,
+      random: () => 0,
+      now: 1_000,
+    });
+
+    expect(selection.explored).toBe(true);
+    expect(new Set(selection.candidates.map(({ provider }) => provider)).size).toBe(2);
+  });
+
+  it("merges shared cooldowns from another server instance", () => {
+    const tracker = new InferenceTracker();
+    tracker.mergeSharedRuntime([{
+      scope: "provider",
+      stateKey: "provider:groq",
+      provider: "groq",
+      model: null,
+      attempts: 4,
+      successes: 2,
+      failures: 2,
+      cancellations: 0,
+      consecutiveFailures: 1,
+      latencyEmaMs: null,
+      cooldownUntil: 10_000,
+      remainingRequests: 0,
+      remainingTokens: 8_000,
+      requestQuotaResetAt: 10_000,
+      tokenQuotaResetAt: 4_000,
+      lastAttemptAt: 2_000,
+      lastSuccessAt: 1_000,
+      lastFailureAt: 2_000,
+      statuses: {},
+      updatedAt: 2_000,
+    }], 3_000);
+
+    expect(tracker.isAvailable(groqFast, 3_000)).toBe(false);
+    expect(tracker.isAvailable(groqFast, 11_000)).toBe(true);
+  });
+
   it("shares model cooldowns across every use of the same provider/model", () => {
     const tracker = new InferenceTracker();
     tracker.started(groqFast, 1_000);
@@ -380,18 +483,35 @@ describe("adaptive inference health", () => {
     }]);
   });
 
-  it("learns remaining quota and reset timing from provider headers", () => {
+  it("learns independent request and token quota reset timing", () => {
     const headers = new Headers({
       "x-ratelimit-remaining-requests-day": "12",
       "x-ratelimit-remaining-tokens-minute": "4096",
       "x-ratelimit-reset-requests-day": "1m30s",
+      "x-ratelimit-reset-tokens-minute": "5s",
     });
 
     expect(quotaFromHeaders(headers, 10_000)).toEqual({
       remainingRequests: 12,
       remainingTokens: 4096,
-      quotaResetAt: 100_000,
+      requestQuotaResetAt: 100_000,
+      tokenQuotaResetAt: 15_000,
     });
+  });
+
+  it("does not hold an entire provider until the longer request reset when tokens recover sooner", () => {
+    const tracker = new InferenceTracker();
+    const anotherGroqModel = { ...groqFast, id: "groq:example/other", model: "example/other" };
+    tracker.started(groqFast, 1_000);
+    tracker.failed(groqFast, { status: 429, retryAfter: 1 }, 10, new Headers({
+      "x-ratelimit-remaining-requests": "10",
+      "x-ratelimit-remaining-tokens": "0",
+      "x-ratelimit-reset-requests": "90s",
+      "x-ratelimit-reset-tokens": "5s",
+    }), 1_010);
+
+    expect(tracker.isAvailable(anotherGroqModel, 5_000)).toBe(false);
+    expect(tracker.isAvailable(anotherGroqModel, 7_000)).toBe(true);
   });
 });
 
