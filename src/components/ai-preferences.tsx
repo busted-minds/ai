@@ -164,7 +164,7 @@ function AiPreferencesForm({
           value={instructions}
           maxLength={MAX_CUSTOM_INSTRUCTIONS_LENGTH}
           rows={6}
-          placeholder="Example: Keep answers concise, use TypeScript examples, and explain unfamiliar terms."
+          placeholder="Example: Keep answers concise, use simple language, and explain unfamiliar terms."
           onChange={(event) => setInstructions(event.target.value)}
           disabled={!canSaveInstructions || saving}
         />
@@ -193,8 +193,8 @@ function AiPreferencesForm({
               : saving
                 ? "Saving…"
                 : instructionsChanged
-                  ? "Save instructions"
-                  : "Instructions saved online"}
+                  ? "Save"
+                  : "Save"}
           </button>
         </div>
       </div>
