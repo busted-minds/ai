@@ -149,6 +149,10 @@ function isZeroPrice(value: unknown): boolean {
   return numberValue(value) === 0;
 }
 
+function isExplicitZeroPrice(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== "" && numberValue(value) === 0;
+}
+
 function parseGoogle(payload: unknown): ModelSpec[] {
   const root = record(payload);
   return records(root?.models)
@@ -246,8 +250,23 @@ function parseCerebras(payload: unknown): ModelSpec[] {
   const root = record(payload);
   return records(root?.data).flatMap((item) => {
     const model = stringValue(item.id);
-    if (!model || UNSUITABLE_MODEL_PATTERN.test(model)) return [];
-    return [discoveredModel("cerebras", model)];
+    const pricing = record(item.pricing);
+    const capabilities = record(item.capabilities);
+    const limits = record(item.limits);
+    const architecture = record(item.architecture);
+    const modality = stringValue(architecture?.modality);
+    if (
+      !model
+      || item.deprecated === true
+      || UNSUITABLE_MODEL_PATTERN.test(model)
+      || !pricing
+      || !isExplicitZeroPrice(pricing.prompt)
+      || !isExplicitZeroPrice(pricing.completion)
+    ) return [];
+    return [discoveredModel("cerebras", model, {
+      vision: booleanValue(capabilities?.vision) || Boolean(modality && /vision/i.test(modality)),
+      contextWindow: numberValue(limits?.max_context_length),
+    })];
   });
 }
 
@@ -281,13 +300,19 @@ async function fetchProviderCatalog(
     : provider.catalogUrl;
   try {
     const response = await fetch(url, {
-      headers: provider.name === "google" ? undefined : { Authorization: `Bearer ${apiKey}` },
+      headers: provider.name === "google" || provider.name === "cerebras"
+        ? undefined
+        : { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`catalog returned ${response.status}`);
     const models = parseProviderCatalog(provider.name, await response.json());
-    if (!models.length) throw new Error("catalog contained no eligible free chat models");
+    // A paid-only Cerebras catalog is a valid empty free catalog. Other
+    // providers retain their last-known free fallbacks when parsing fails.
+    if (!models.length && provider.name !== "cerebras") {
+      throw new Error("catalog contained no eligible free chat models");
+    }
     return models;
   } finally {
     clearTimeout(timer);

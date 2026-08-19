@@ -57,6 +57,9 @@ type WidgetChatProps = {
   initialViewer: Viewer;
   initialRemaining: number | null;
   theme: "dark" | "light";
+  initialQuery?: string;
+  initialUseSearch?: boolean;
+  searchEmbed?: boolean;
 };
 
 type ChatResponse = {
@@ -275,14 +278,21 @@ function WidgetModePicker({
   );
 }
 
-export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetChatProps) {
+export function WidgetChat({
+  initialViewer,
+  initialRemaining,
+  theme,
+  initialQuery = "",
+  initialUseSearch = false,
+  searchEmbed = false,
+}: WidgetChatProps) {
   const router = useRouter();
   const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const messages = activeMessagePath(allMessages, activeLeafId);
-  const [guestHydrated, setGuestHydrated] = useState(initialViewer.authenticated);
+  const [guestHydrated, setGuestHydrated] = useState(initialViewer.authenticated || searchEmbed);
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialQuery);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const [remaining, setRemaining] = useState(initialRemaining);
@@ -294,9 +304,11 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const initialSubmitScheduledRef = useRef(false);
+  const initialSearchPendingRef = useRef(Boolean(initialQuery && initialUseSearch));
 
   useEffect(() => {
-    if (initialViewer.authenticated) return;
+    if (initialViewer.authenticated || searchEmbed) return;
     const hydrateTimer = window.setTimeout(() => {
       const conversation = safeStoredConversation();
       setAllMessages(conversation.allMessages);
@@ -304,15 +316,15 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
       setGuestHydrated(true);
     }, 0);
     return () => window.clearTimeout(hydrateTimer);
-  }, [initialViewer.authenticated]);
+  }, [initialViewer.authenticated, searchEmbed]);
 
   useEffect(() => {
-    if (initialViewer.authenticated || !guestHydrated) return;
+    if (initialViewer.authenticated || !guestHydrated || searchEmbed) return;
     localStorage.setItem(WIDGET_GUEST_MESSAGES_KEY, JSON.stringify({
       allMessages: persistableMessages(allMessages),
       activeLeafId,
     }));
-  }, [activeLeafId, allMessages, guestHydrated, initialViewer.authenticated]);
+  }, [activeLeafId, allMessages, guestHydrated, initialViewer.authenticated, searchEmbed]);
 
   useEffect(() => {
     const hydrateTimer = window.setTimeout(() => {
@@ -373,6 +385,10 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
     const baseAllMessages = allMessages;
     const baseActiveLeafId = activeLeafId;
     const parentMessageId = baseMessages.at(-1)?.id ?? null;
+    const forceInitialSearch = initialSearchPendingRef.current
+      && baseMessages.length === 0
+      && text === initialQuery;
+    if (forceInitialSearch) initialSearchPendingRef.current = false;
     const optimisticMessage: ChatMessage = {
       id: localId(),
       role: "user",
@@ -399,8 +415,17 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
           attachments: attachmentPayload(selectedAttachments),
           parentMessageId,
           mode,
+          useSearch: forceInitialSearch,
+          privateChat: searchEmbed,
           history: initialViewer.authenticated
-            ? undefined
+            ? searchEmbed
+              ? guestHistoryPayload(
+                  baseMessages.slice(-23).map((message) => ({
+                    ...message,
+                    attachments: selectedAttachments.length ? undefined : message.attachments,
+                  })),
+                )
+              : undefined
             : guestHistoryPayload(
                 baseMessages.slice(-23).map((message) => ({
                   ...message,
@@ -431,6 +456,12 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
   };
+
+  useEffect(() => {
+    if (!initialQuery || !guestHydrated || !modeHydrated || initialSubmitScheduledRef.current) return;
+    initialSubmitScheduledRef.current = true;
+    window.setTimeout(() => textareaRef.current?.form?.requestSubmit(), 0);
+  }, [guestHydrated, initialQuery, modeHydrated]);
 
   const chooseAttachments = async (files: FileList | null) => {
     if (!files?.length || pending || branchSwitching || attachmentPreparing) return;
@@ -742,7 +773,7 @@ export function WidgetChat({ initialViewer, initialRemaining, theme }: WidgetCha
             </button>
           </div>
         </form>
-        {!messages.length && <p>Busted Minds AI cannot make mistakes.</p>}
+        {!messages.length && <p>Busted Minds AI can make mistakes. Check important answers.</p>}
       </footer>
     </main>
   );

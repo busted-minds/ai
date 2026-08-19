@@ -72,7 +72,9 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = [
   {
     name: "cerebras",
     keyName: "CEREBRAS_API_KEY",
-    catalogUrl: "https://api.cerebras.ai/v1/models",
+    // The authenticated catalog does not expose enough pricing metadata to
+    // distinguish shared/PAYG models from genuinely no-cost models.
+    catalogUrl: "https://api.cerebras.ai/public/v1/models",
   },
   {
     name: "groq",
@@ -146,7 +148,6 @@ export const CURATED_MODEL_ORDER: Readonly<
       "nvidia:nvidia/nemotron-3.5-lightning-30b-a3b",
       "openrouter:nvidia/nemotron-3.5-lightning:free",
       "mistral:mistral-small-latest",
-      "cerebras:gemma-4-31b",
     ],
     code: [
       "groq:openai/gpt-oss-20b",
@@ -297,19 +298,6 @@ export const FALLBACK_MODELS: readonly ModelSpec[] = [
   defineModel({
     provider: "mistral", keyName: "MISTRAL_API_KEY", model: "magistral-small-latest",
     vision: true, quality: 8.6, speed: 7, specialties: reasoning,
-  }),
-
-  defineModel({
-    provider: "cerebras", keyName: "CEREBRAS_API_KEY", model: "gpt-oss-120b",
-    vision: false, quality: 9, speed: 9.5, specialties: codeReasoning,
-  }),
-  defineModel({
-    provider: "cerebras", keyName: "CEREBRAS_API_KEY", model: "zai-glm-4.7",
-    vision: false, quality: 8.7, speed: 9, specialties: codeReasoning,
-  }),
-  defineModel({
-    provider: "cerebras", keyName: "CEREBRAS_API_KEY", model: "gemma-4-31b",
-    vision: false, quality: 8, speed: 9.5, specialties: general,
   }),
 
   defineModel({

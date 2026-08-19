@@ -178,7 +178,8 @@ describe("chat mode routing", () => {
     expect(MODEL_POOLS.fast.every(({ free }) => free)).toBe(true);
     expect(MODEL_POOLS.expert.every(({ free }) => free)).toBe(true);
     expect(MODEL_POOLS.fast.map(({ model }) => model)).not.toEqual(MODEL_POOLS.expert.map(({ model }) => model));
-    expect(new Set(FALLBACK_MODELS.map(({ provider }) => provider)).size).toBe(6);
+    expect(new Set(FALLBACK_MODELS.map(({ provider }) => provider)).size).toBe(5);
+    expect(FALLBACK_MODELS).not.toContainEqual(expect.objectContaining({ provider: "cerebras" }));
   });
 
   it("routes images only to vision-capable providers", () => {
@@ -317,6 +318,41 @@ describe("free model registry", () => {
     expect(mistral.map(({ model }) => model)).toEqual(["mistral-large-latest"]);
     expect(groq.map(({ model }) => model)).toEqual(["qwen/qwen3.6-27b"]);
     expect(groq[0]?.vision).toBe(true);
+  });
+
+  it("only admits explicitly zero-cost Cerebras models", () => {
+    const models = parseProviderCatalog("cerebras", {
+      data: [
+        {
+          id: "qwen-3.8-27b",
+          pricing: { prompt: "0.0000004", completion: "0.0000008" },
+          capabilities: { vision: true },
+          limits: { max_context_length: 131_072 },
+        },
+        {
+          id: "qwen-3.8-27b-free",
+          pricing: { prompt: "0", completion: "0" },
+          capabilities: { vision: true },
+          limits: { max_context_length: 131_072 },
+        },
+        {
+          id: "catalog-entry-without-pricing",
+          capabilities: { vision: false },
+        },
+        {
+          id: "retired-free-model",
+          pricing: { prompt: "0", completion: "0" },
+          deprecated: true,
+        },
+      ],
+    });
+
+    expect(models.map(({ model }) => model)).toEqual(["qwen-3.8-27b-free"]);
+    expect(models[0]).toMatchObject({
+      free: true,
+      vision: true,
+      contextWindow: 131_072,
+    });
   });
 
   it("rejects NVIDIA historical, embedding, guard, and generation-only entries", () => {
