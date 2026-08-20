@@ -14,11 +14,6 @@ const SEARCH_ENV_NAMES = [
   "TAVILY_SEARCH_KEY1",
   "TAVILY_SEARCH_KEY2",
   "EXA_SEARCH_KEY",
-  "GOOGLE_API_KEY",
-  "GOOGLE_SEARCH_API_KEY1",
-  "GOOGLE_SEARCH_API_KEY2",
-  "GOOGLE_CSE_ID",
-  "GOOGLE_SEARCH_DAILY_LIMIT",
   "WEB_SEARCH_CACHE_TTL_MS",
 ] as const;
 
@@ -150,28 +145,6 @@ describe("web search routing", () => {
 
     expect(result.provider).toBe("Exa");
     expect(result.context).toContain("Relevant extracted passage.");
-  });
-
-  it("keeps the Gemini key out of Google Search and tries the two search keys last", async () => {
-    process.env.GOOGLE_API_KEY = "gemini-only";
-    process.env.GOOGLE_SEARCH_API_KEY1 = "search-one";
-    process.env.GOOGLE_SEARCH_API_KEY2 = "search-two";
-    process.env.GOOGLE_CSE_ID = "engine-id";
-    const requestedKeys: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = new URL(String(input));
-      requestedKeys.push(url.searchParams.get("key") ?? "");
-      if (url.searchParams.get("key") === "search-one") return jsonResponse({}, 429);
-      return jsonResponse({
-        items: [{ title: "Google result", link: "https://example.com/google", snippet: "Result snippet" }],
-      });
-    }));
-
-    const result = await searchWeb("look up a Google fallback result");
-
-    expect(result.provider).toBe("Google Custom Search 2");
-    expect(requestedKeys).toEqual(["search-one", "search-two"]);
-    expect(requestedKeys).not.toContain("gemini-only");
   });
 
   it("caches successful identical searches to preserve free quota", async () => {

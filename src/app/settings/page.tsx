@@ -74,8 +74,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               </dl>
               <p className="account-identity-note">Your username is managed by Busted Minds Account and cannot be edited in BMAI.</p>
               <div className="auth-actions settings-section-actions">
-                <a className="ghost-button" href="https://accounts.bustedminds.us.kg/"><ShieldCheck size={17} /> Manage account</a>
-                <a className="ghost-button" href="https://accounts.bustedminds.us.kg/auth?mode=forgot&source=bmai&next=%2Fsettings"><KeyRound size={17} /> Reset password</a>
+                <a className="ghost-button" href="https://accounts.bustedminds.org/"><ShieldCheck size={17} /> Manage account</a>
+                <a className="ghost-button" href="https://accounts.bustedminds.org/auth?mode=forgot&source=bmai&next=%2Fsettings"><KeyRound size={17} /> Reset password</a>
                 <form action="/auth/sign-out" method="post">
                   <button className="danger-button" type="submit"><LogOut size={17} /> Log out</button>
                 </form>
@@ -83,8 +83,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
             </>
           ) : (
             <div className="settings-account-guest">
-              <p>Sign in to sync your username and conversation history across devices.</p>
-              <Link className="primary-button" href="/auth/sign-in?next=/settings"><LogIn size={17} /> Sign in</Link>
+              <p>Connect your Busted Minds Account to sync your username and conversation history across devices.</p>
+              <Link className="primary-button" href="/account?next=/settings"><LogIn size={17} /> Connect account</Link>
             </div>
           )}
         </section>

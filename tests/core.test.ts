@@ -5,6 +5,10 @@ import {
   GUEST_MESSAGE_LIMIT,
   remainingGuestMessages,
 } from "@/lib/auth/guest-usage";
+import {
+  accountRegistrationHref,
+  accountSignInHref,
+} from "@/lib/auth/account-links";
 import { makeThreadTitle } from "@/lib/chat-data";
 import { safeNextPath } from "@/lib/security";
 import { duckDuckGoQuery, shouldUseDuckDuckGo } from "@/lib/ai/duckduckgo";
@@ -67,6 +71,33 @@ describe("safe redirects", () => {
     expect(safeNextPath("/account?tab=history")).toBe("/account?tab=history");
     expect(safeNextPath("https://attacker.example")).toBe("/");
     expect(safeNextPath("//attacker.example")).toBe("/");
+    expect(safeNextPath("/%5C%5Cattacker.example")).toBe("/");
+  });
+});
+
+describe("Busted Minds Account links", () => {
+  it("keeps returning users inside the AI OAuth flow", () => {
+    expect(accountSignInHref("/settings")).toBe(
+      "/auth/sign-in?next=%2Fsettings",
+    );
+  });
+
+  it("opens central registration and then continues back through AI sign-in", () => {
+    const registration = new URL(accountRegistrationHref("/settings"));
+    const continuation = new URL(
+      registration.searchParams.get("next") ?? "",
+      registration.origin,
+    );
+
+    expect(registration.origin).toBe("https://accounts.bustedminds.org");
+    expect(registration.pathname).toBe("/auth");
+    expect(registration.searchParams.get("mode")).toBe("register");
+    expect(registration.searchParams.get("source")).toBe("bmai");
+    expect(continuation.pathname).toBe("/account/connect/bmai");
+    expect(continuation.searchParams.get("next")).toBe("/settings");
+    expect(continuation.searchParams.get("origin")).toBe(
+      "https://ai.bustedminds.org",
+    );
   });
 });
 

@@ -51,7 +51,7 @@ let clientSecret;
 if (!oauthClient) {
   const { data, error } = await central.auth.admin.oauth.createClient({
     client_name: clientName,
-    client_uri: "https://bustedminds.us.kg/",
+    client_uri: "https://bustedminds.org/",
     redirect_uris: [callback],
     grant_types: ["authorization_code", "refresh_token"],
     response_types: ["code"],

@@ -31,7 +31,7 @@ export default async function SharedChatPage({ params }: SharedChatPageProps) {
   const ownerCanOpenOriginal = viewer.authenticated
     && viewer.id === sharedChat.ownerUserId
     && Boolean(sharedChat.sourceThreadId);
-  const signInPath = `/auth/sign-in?next=${encodeURIComponent(`/share/${token}`)}`;
+  const signInPath = `/account?next=${encodeURIComponent(`/share/${token}`)}`;
 
   return (
     <main className="shared-chat-page">

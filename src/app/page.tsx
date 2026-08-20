@@ -6,7 +6,7 @@ import { isUuid } from "@/lib/chat-projects";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ChatThread } from "@/lib/types";
 
-const siteUrl = "https://ai.bustedminds.us.kg/";
+const siteUrl = "https://ai.bustedminds.org/";
 const siteTitle = "Busted Minds AI — AI Chat & Thought Partner";
 const siteDescription =
   "Chat with Busted Minds AI for sharp answers, clearer thinking, coding help, research, and honest feedback.";
@@ -22,9 +22,9 @@ const structuredData = {
   "@graph": [
     {
       "@type": "Organization",
-      "@id": "https://bustedminds.us.kg/#organization",
+      "@id": "https://bustedminds.org/#organization",
       name: "Busted Minds",
-      url: "https://bustedminds.us.kg/",
+      url: "https://bustedminds.org/",
     },
     {
       "@type": "WebSite",
@@ -33,7 +33,7 @@ const structuredData = {
       alternateName: "BM AI",
       url: siteUrl,
       description: siteDescription,
-      publisher: { "@id": "https://bustedminds.us.kg/#organization" },
+      publisher: { "@id": "https://bustedminds.org/#organization" },
     },
     {
       "@type": "WebApplication",
@@ -45,7 +45,7 @@ const structuredData = {
       applicationCategory: "UtilitiesApplication",
       operatingSystem: "Any",
       browserRequirements: "Requires JavaScript",
-      publisher: { "@id": "https://bustedminds.us.kg/#organization" },
+      publisher: { "@id": "https://bustedminds.org/#organization" },
       image: `${siteUrl}brand/bmai-og.png`,
     },
   ],

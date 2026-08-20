@@ -37,12 +37,10 @@ const MAX_QUERY_WORDS = 50;
 const PER_PROVIDER_TIMEOUT_MS = 4_500;
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1_000;
 const MAX_CACHE_ENTRIES = 100;
-const GOOGLE_FREE_DAILY_LIMIT = 100;
 
 const providerCooldowns = new Map<string, number>();
 const resultCache = new Map<string, { expiresAt: number; result: WebSearchResult }>();
 const pendingSearches = new Map<string, Promise<WebSearchResult>>();
-let googleUsage = { day: "", count: 0 };
 
 class SearchProviderError extends Error {
   retryAfterMs?: number;
@@ -309,54 +307,12 @@ async function exaSearch(apiKey: string, query: string, signal: AbortSignal): Pr
   };
 }
 
-function googleDailyLimit(): number {
-  const configured = Number(process.env.GOOGLE_SEARCH_DAILY_LIMIT);
-  if (!Number.isFinite(configured)) return GOOGLE_FREE_DAILY_LIMIT;
-  return Math.min(GOOGLE_FREE_DAILY_LIMIT, Math.max(0, Math.floor(configured)));
-}
-
-function reserveGoogleQuery(now = new Date()): void {
-  const day = now.toISOString().slice(0, 10);
-  if (googleUsage.day !== day) googleUsage = { day, count: 0 };
-  if (googleUsage.count >= googleDailyLimit()) {
-    const tomorrow = Date.parse(`${day}T00:00:00.000Z`) + 24 * 60 * 60 * 1_000;
-    throw new SearchProviderError(429, "Local Google free-tier daily limit reached", tomorrow - now.getTime());
-  }
-  googleUsage.count += 1;
-}
-
-async function googleSearch(apiKey: string, cseId: string, query: string, signal: AbortSignal): Promise<ProviderResult> {
-  reserveGoogleQuery();
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
-  url.search = new URLSearchParams({
-    key: apiKey,
-    cx: cseId,
-    q: query,
-    num: "8",
-    safe: "active",
-    filter: "1",
-  }).toString();
-  const payload = await jsonRequest(url, { headers: { Accept: "application/json" }, signal });
-  return {
-    items: uniqueItems(array(payload.items).map((item) => searchItem(item, {
-      title: "title",
-      url: "link",
-      snippet: "snippet",
-    }))),
-  };
-}
-
 function providers(): SearchProvider[] {
   const configured: SearchProvider[] = [];
   const braveSearchKey = configuredValue("BRAVESEARACH_SEARCH_KEY", "BRAVESEARCH_SEARCH_KEY");
   const braveAnswerKey = configuredValue("BRAVESEARACH_ANSWER_KEY", "BRAVESEARCH_ANSWER_KEY");
   const tavilyKeys = [configuredValue("TAVILY_SEARCH_KEY1"), configuredValue("TAVILY_SEARCH_KEY2")];
   const exaKey = configuredValue("EXA_SEARCH_KEY");
-  const googleKeys = [
-    configuredValue("GOOGLE_SEARCH_API_KEY1"),
-    configuredValue("GOOGLE_SEARCH_API_KEY2"),
-  ];
-  const googleCseId = configuredValue("GOOGLE_CSE_ID");
 
   if (braveSearchKey) configured.push({
     id: "brave-search",
@@ -381,16 +337,6 @@ function providers(): SearchProvider[] {
     label: "Exa",
     search: (query, signal) => exaSearch(exaKey, query, signal),
   });
-  if (googleCseId) {
-    googleKeys.forEach((apiKey, index) => {
-      if (!apiKey) return;
-      configured.push({
-        id: `google-${index + 1}`,
-        label: `Google Custom Search ${index + 1}`,
-        search: (query, signal) => googleSearch(apiKey, googleCseId, query, signal),
-      });
-    });
-  }
   configured.push({
     id: "duckduckgo",
     label: "DuckDuckGo Instant Answers",
@@ -540,5 +486,4 @@ export function resetWebSearchStateForTests(): void {
   providerCooldowns.clear();
   resultCache.clear();
   pendingSearches.clear();
-  googleUsage = { day: "", count: 0 };
 }

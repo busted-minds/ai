@@ -4,7 +4,7 @@ import "./globals.css";
 
 const bodyFont = Manrope({ subsets: ["latin"], variable: "--font-body", display: "swap" });
 const displayFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-display", display: "swap" });
-const siteUrl = "https://ai.bustedminds.us.kg";
+const siteUrl = "https://ai.bustedminds.org";
 const siteTitle = "Busted Minds AI — AI Chat & Thought Partner";
 const siteDescription =
   "Chat with Busted Minds AI for sharp answers, clearer thinking, coding help, research, and honest feedback.";
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   title: { default: siteTitle, template: "%s · Busted Minds AI" },
   description: siteDescription,
   applicationName: "Busted Minds AI",
-  authors: [{ name: "Busted Minds", url: "https://bustedminds.us.kg/" }],
+  authors: [{ name: "Busted Minds", url: "https://bustedminds.org/" }],
   creator: "Busted Minds",
   publisher: "Busted Minds",
   manifest: "/manifest.webmanifest",

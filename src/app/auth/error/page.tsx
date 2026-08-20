@@ -19,7 +19,7 @@ export default function AuthErrorPage() {
           Your account is safe. The sign-in link may have expired, been cancelled, or hit a temporary configuration issue.
         </p>
         <div className="auth-actions">
-          <Link className="primary-button" href="/auth/sign-in"><RefreshCw size={17} /> Try again</Link>
+          <Link className="primary-button" href="/account"><RefreshCw size={17} /> Try again</Link>
           <Link className="ghost-button" href="/"><ArrowLeft size={17} /> Back to chat</Link>
         </div>
       </section>

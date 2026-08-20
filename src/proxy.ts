@@ -52,16 +52,7 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const { data } = await supabase.auth.getUser();
-  if (request.nextUrl.pathname.startsWith("/account") && (!data.user || data.user.is_anonymous)) {
-    const destination = request.nextUrl.clone();
-    destination.pathname = "/auth/sign-in";
-    destination.search = "";
-    destination.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
-    const redirect = NextResponse.redirect(destination);
-    for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
-    return applySecurityHeaders(redirect, request.nextUrl.pathname, sameOriginPreview);
-  }
+  await supabase.auth.getUser();
   return applySecurityHeaders(response, request.nextUrl.pathname, sameOriginPreview);
 }
 

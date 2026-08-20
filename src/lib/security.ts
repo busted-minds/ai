@@ -1,5 +1,17 @@
 export function safeNextPath(value: string | null | undefined, fallback = "/"): string {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return fallback;
+  try {
+    const decoded = decodeURIComponent(value);
+    if (
+      decoded.startsWith("//")
+      || decoded.includes("\\")
+      || /[\u0000-\u001f\u007f]/u.test(decoded)
+    ) {
+      return fallback;
+    }
+  } catch {
+    return fallback;
+  }
   return value;
 }
 

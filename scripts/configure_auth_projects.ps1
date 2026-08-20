@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-  [string]$BmaiSiteUrl = "https://ai.bustedminds.us.kg",
-  [string]$CentralAccountUrl = "https://accounts.bustedminds.us.kg",
+  [string]$BmaiSiteUrl = "https://ai.bustedminds.org",
+  [string]$CentralAccountUrl = "https://accounts.bustedminds.org",
   [switch]$Apply
 )
 

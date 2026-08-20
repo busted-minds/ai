@@ -12,12 +12,13 @@ import {
   remainingGuestMessages,
 } from "@/lib/auth/guest-usage";
 import { normalizeCustomInstructions } from "@/lib/chat-preferences";
+import { preferredUsernameFromUser } from "@/lib/auth/shared-identity";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const SEARCH_ORIGIN = "https://search.bustedminds.us.kg";
+const SEARCH_ORIGIN = "https://search.bustedminds.org";
 const LOCAL_ORIGIN = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/;
 
 type SearchSource = {
@@ -38,7 +39,7 @@ function corsHeaders(request: Request): HeadersInit {
     ...(origin ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Max-Age": "86400",
     "Cache-Control": "no-store",
     Vary: "Origin",
@@ -78,6 +79,22 @@ function extractSources(answer: string): SearchSource[] {
 export async function OPTIONS(request: Request) {
   if (!requestIsAllowed(request)) return json(request, { message: "Origin not allowed." }, 403);
   return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
+}
+
+export async function GET(request: Request) {
+  if (!requestIsAllowed(request)) return json(request, { message: "Origin not allowed." }, 403);
+
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase.auth.getUser();
+  const user = data.user && !data.user.is_anonymous ? data.user : null;
+  const cookieStore = await cookies();
+  const used = decodeGuestUsage(cookieStore.get(GUEST_USAGE_COOKIE)?.value);
+
+  return json(request, {
+    authenticated: Boolean(user),
+    username: user ? preferredUsernameFromUser(user) : null,
+    remainingGuestMessages: user ? null : remainingGuestMessages(used),
+  });
 }
 
 export async function POST(request: Request) {
@@ -133,6 +150,7 @@ export async function POST(request: Request) {
       sources: extractSources(answer),
       remainingGuestMessages: user ? null : remainingGuestMessages(nextUsed),
       authenticated: Boolean(user),
+      username: user ? preferredUsernameFromUser(user) : null,
     });
     if (!user) {
       response.cookies.set(GUEST_USAGE_COOKIE, encodeGuestUsage(nextUsed), {

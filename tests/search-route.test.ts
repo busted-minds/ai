@@ -26,7 +26,7 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-import { OPTIONS, POST } from "@/app/api/search/route";
+import { GET, OPTIONS, POST } from "@/app/api/search/route";
 
 describe("native Busted Minds search API", () => {
   beforeEach(() => {
@@ -39,11 +39,11 @@ describe("native Busted Minds search API", () => {
   });
 
   it("returns a web-grounded answer and normalized sources to the search site", async () => {
-    const request = new Request("https://ai.bustedminds.us.kg/api/search", {
+    const request = new Request("https://ai.bustedminds.org/api/search", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Origin: "https://search.bustedminds.us.kg",
+        Origin: "https://search.bustedminds.org",
       },
       body: JSON.stringify({ query: "What changed today?" }),
     });
@@ -51,7 +51,7 @@ describe("native Busted Minds search API", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://search.bustedminds.us.kg");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://search.bustedminds.org");
     expect(mocks.generateAnswer).toHaveBeenCalledWith(
       [{ role: "user", content: "What changed today?" }],
       expect.objectContaining({ forceSearch: true, mode: "auto" }),
@@ -61,15 +61,16 @@ describe("native Busted Minds search API", () => {
       sources: [{ title: "Example source", url: "https://example.com/report", domain: "example.com" }],
       remainingGuestMessages: 9,
       authenticated: false,
+      username: null,
     });
   });
 
   it("handles preflight and rejects unrelated browser origins", async () => {
-    const allowed = await OPTIONS(new Request("https://ai.bustedminds.us.kg/api/search", {
+    const allowed = await OPTIONS(new Request("https://ai.bustedminds.org/api/search", {
       method: "OPTIONS",
-      headers: { Origin: "https://search.bustedminds.us.kg" },
+      headers: { Origin: "https://search.bustedminds.org" },
     }));
-    const blocked = await POST(new Request("https://ai.bustedminds.us.kg/api/search", {
+    const blocked = await POST(new Request("https://ai.bustedminds.org/api/search", {
       method: "POST",
       headers: { Origin: "https://example.net" },
       body: JSON.stringify({ query: "No" }),
@@ -78,5 +79,33 @@ describe("native Busted Minds search API", () => {
     expect(allowed.status).toBe(204);
     expect(blocked.status).toBe(403);
     expect(mocks.generateAnswer).toHaveBeenCalledTimes(0);
+  });
+
+  it("reports the current Search account session without using an AI search", async () => {
+    mocks.getUser.mockResolvedValue({
+      data: {
+        user: {
+          is_anonymous: false,
+          identities: [{
+            provider: "custom:busted-minds",
+            identity_data: {
+              email_verified: true,
+              preferred_username: "searcher_64",
+            },
+          }],
+        },
+      },
+    });
+
+    const response = await GET(new Request("https://ai.bustedminds.org/api/search", {
+      headers: { Origin: "https://search.bustedminds.org" },
+    }));
+
+    await expect(response.json()).resolves.toEqual({
+      authenticated: true,
+      username: "searcher_64",
+      remainingGuestMessages: null,
+    });
+    expect(mocks.generateAnswer).not.toHaveBeenCalled();
   });
 });

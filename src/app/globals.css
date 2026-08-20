@@ -531,6 +531,29 @@ button { color: inherit; }
 .account-card { text-align: center; }
 .account-card > .auth-logo { display: block; margin-right: auto; margin-left: auto; }
 .account-card .auth-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.account-gateway-card { width: min(100%, 620px); text-align: center; }
+.account-gateway-close { position: absolute; top: 18px; right: 18px; }
+.account-relationship { display: flex; min-height: 68px; align-items: center; justify-content: center; gap: 13px; margin: 0 auto 25px; color: var(--faint); }
+.account-relationship > .theme-logo { display: block; width: 48px; height: 48px; }
+.account-relationship-logo { width: 104px; height: auto; object-fit: contain; }
+.account-gateway-card > .eyebrow { justify-content: center; margin-bottom: 12px; }
+.account-gateway-card > h1 { max-width: 500px; margin: 0 auto; font-family: var(--font-display); font-size: clamp(34px, 7vw, 52px); letter-spacing: -.055em; }
+.account-gateway-card > p { max-width: 500px; margin: 14px auto 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.account-gateway-actions { display: grid; gap: 12px; margin-top: 30px; text-align: left; }
+.account-provider-button { display: grid; min-height: 66px; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 8px 16px 8px 8px; border: 1px solid color-mix(in srgb, var(--cyan) 42%, var(--border-strong)); border-radius: 15px; background: var(--cyan); color: #061317; box-shadow: 0 13px 32px color-mix(in srgb, var(--cyan) 20%, transparent); text-decoration: none; transition: .18s ease; }
+.account-provider-button:hover { transform: translateY(-2px); filter: brightness(1.05); }
+.account-provider-logo { display: grid; width: 58px; height: 50px; place-items: center; overflow: hidden; padding: 6px; border-radius: 11px; background: rgba(255,255,255,.92); }
+.account-provider-logo img { width: 48px; height: auto; object-fit: contain; }
+.account-provider-button > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
+.account-provider-button strong { font-size: 12px; }
+.account-provider-button small { color: rgba(6,19,23,.68); font-size: 9px; font-weight: 750; }
+.account-choice-divider { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 8px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+.account-choice-divider span { height: 1px; flex: 1; background: var(--border); }
+.account-create-button { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: 13px; background: var(--surface-raised); color: var(--text-soft); font-size: 11px; font-weight: 850; text-decoration: none; transition: .16s ease; }
+.account-create-button:hover { border-color: color-mix(in srgb, var(--cyan) 40%, var(--border-strong)); background: var(--surface-hover); color: var(--text); }
+.account-gateway-notes { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px 15px; margin-top: 22px; color: var(--faint); font-size: 8px; font-weight: 700; line-height: 1.45; }
+.account-gateway-notes span { display: inline-flex; align-items: center; gap: 6px; }
+.account-gateway-notes svg { flex: 0 0 auto; color: var(--cyan); }
 .settings-card { width: min(100%, 680px); }
 .settings-close { position: absolute; z-index: 1; top: 18px; right: 18px; }
 .settings-hero { display: grid; justify-items: center; text-align: center; }
@@ -670,6 +693,13 @@ button { color: inherit; }
   .composer-bottom > span { display: none; }
   .auth-card { padding: 28px 22px; border-radius: 20px; }
   .settings-close { top: 12px; right: 12px; }
+  .account-gateway-close { top: 12px; right: 12px; }
+  .account-relationship { justify-content: flex-start; margin-right: 38px; }
+  .account-gateway-card > .eyebrow { justify-content: flex-start; text-align: left; }
+  .account-gateway-card > h1, .account-gateway-card > p { text-align: left; }
+  .account-provider-button { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; padding-left: 7px; }
+  .account-provider-logo { width: 48px; height: 46px; }
+  .account-provider-logo img { width: 40px; }
   .auth-actions { display: grid; grid-template-columns: 1fr; }
   .account-card .auth-actions { grid-template-columns: 1fr; }
   .settings-section { padding: 16px; }

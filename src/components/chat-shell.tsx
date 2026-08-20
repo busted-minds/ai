@@ -1886,10 +1886,10 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             <span className="upgrade-orbit"><BustedBulbMark size={18} /></span>
             <strong>Keep the good stuff.</strong>
             <p>Sign in for unlimited messages and history on every device.</p>
-            <Link href="/auth/sign-in"><LogIn size={16} /> Sign in</Link>
+            <Link href="/account"><LogIn size={16} /> Connect account</Link>
           </div>
         )}
-        <a className="powered-by" href="https://bustedminds.us.kg/" target="_blank" rel="noreferrer">
+        <a className="powered-by" href="https://bustedminds.org/" target="_blank" rel="noreferrer">
           <span>Powered by</span>
           <Image src="/brand/busted-minds.webp" alt="Busted Minds" width={88} height={40} />
         </a>
@@ -1902,9 +1902,9 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
                     <span className="profile-menu-icon"><Settings size={16} /></span>
                     <span><strong>Settings</strong></span>
                   </Link>
-                  <a href="https://accounts.bustedminds.us.kg/" className="profile-menu-item" role="menuitem">
+                  <a href="https://accounts.bustedminds.org/" className="profile-menu-item" role="menuitem">
                     <span className="profile-menu-icon"><UserRound size={16} /></span>
-                    <span><strong>Account</strong><small>accounts.bustedminds.us.kg</small></span>
+                    <span><strong>Account</strong><small>accounts.bustedminds.org</small></span>
                     <ArrowUpRight size={14} />
                   </a>
                   <form action="/auth/sign-out" method="post">
@@ -1928,7 +1928,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
               </button>
             </div>
           ) : (
-            <Link href="/auth/sign-in" className="account-link">
+            <Link href="/account" className="account-link">
               <span className="avatar"><UserRound size={17} /></span>
               <span><strong>Guest mind</strong><small>{remaining ?? 10} messages left</small></span>
               <ArrowUpRight size={15} />
@@ -2014,10 +2014,10 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             </button>
           ) : (
             <Link
-              href="/auth/sign-in"
+              href="/account"
               className="sidebar-rail-control sidebar-rail-account"
-              aria-label="Sign in"
-              data-tooltip="Sign in"
+              aria-label="Connect Busted Minds Account"
+              data-tooltip="Connect account"
             >
               <LogIn size={20} />
             </Link>
@@ -2220,7 +2220,7 @@ export function ChatShell({ initialViewer, initialThread = null }: ChatShellProp
             {error && (
               <div className="composer-error" role="alert">
                 <span>{error}</span>
-                {!viewer.authenticated && remaining === 0 && <Link href="/auth/sign-in">Sign in now <ArrowUpRight size={14} /></Link>}
+                {!viewer.authenticated && remaining === 0 && <Link href="/account">Connect account <ArrowUpRight size={14} /></Link>}
                 <button type="button" onClick={() => setError("")} aria-label="Dismiss"><X size={15} /></button>
               </div>
             )}

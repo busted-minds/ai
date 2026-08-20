@@ -173,7 +173,7 @@ function AiPreferencesForm({
             ? "Saved securely to your account and applied across your signed-in devices."
             : authenticated
               ? "Your online custom instructions could not be loaded. Refresh this page to try again."
-            : <><Link href="/auth/sign-in?next=/settings">Sign in</Link> to save custom instructions securely to your account.</>}
+            : <><Link href="/account?next=/settings">Connect your Busted Minds Account</Link> to save custom instructions securely.</>}
         </p>
         {saveError && <p className="preference-save-error" role="alert">{saveError}</p>}
         <div className="preference-actions">
