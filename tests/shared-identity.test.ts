@@ -8,7 +8,10 @@ import {
 
 const centralAccountId = "0f349592-78c2-4d75-aa3e-401b83c68cc0";
 
-function userWithIdentity(identityData: Record<string, unknown>): User {
+function userWithIdentity(
+  identityData: Record<string, unknown>,
+  provider = "custom:busted-minds",
+): User {
   return {
     id: "fb2203f1-adfc-49ab-8da3-61b8807960fb",
     email: "mind@example.com",
@@ -20,7 +23,7 @@ function userWithIdentity(identityData: Record<string, unknown>): User {
     identities: [{
       id: centralAccountId,
       identity_id: centralAccountId,
-      provider: "custom:busted-minds",
+      provider,
       identity_data: identityData,
       user_id: "fb2203f1-adfc-49ab-8da3-61b8807960fb",
       created_at: "2026-08-10T00:00:00.000Z",
@@ -48,6 +51,17 @@ describe("shared Busted Minds identity", () => {
       username: "Ada_Mind",
       updated_at: "2026-08-10T01:02:03.000Z",
     });
+  });
+
+  it("trusts the Search-branded client from the same central account issuer", () => {
+    const user = userWithIdentity({
+      sub: centralAccountId,
+      email_verified: true,
+      preferred_username: "Ada_Mind",
+    }, "custom:busted-minds-search");
+
+    expect(centralSubjectFromUser(user)).toBe(centralAccountId);
+    expect(preferredUsernameFromUser(user)).toBe("Ada_Mind");
   });
 
   it("ignores user-editable BMAI metadata and unverified provider claims", () => {

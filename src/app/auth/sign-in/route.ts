@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { accountProviderForSignIn } from "@/lib/auth/sign-in-provider";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { AUTH_NEXT_COOKIE, requestOrigin, safeNextPath } from "@/lib/security";
 
@@ -9,7 +10,7 @@ export async function GET(request: Request) {
   const supabase = await createSupabaseServerClient();
   const redirectTo = `${requestOrigin(request)}/auth/callback`;
   const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "custom:busted-minds",
+    provider: accountProviderForSignIn(url.searchParams.get("source"), nextPath),
     options: {
       redirectTo,
       scopes: "openid email profile",

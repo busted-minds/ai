@@ -9,6 +9,11 @@ import {
   accountRegistrationHref,
   accountSignInHref,
 } from "@/lib/auth/account-links";
+import {
+  accountProviderForSignIn,
+  BUSTED_MINDS_AI_PROVIDER,
+  BUSTED_MINDS_SEARCH_PROVIDER,
+} from "@/lib/auth/sign-in-provider";
 import { makeThreadTitle } from "@/lib/chat-data";
 import { safeNextPath } from "@/lib/security";
 import { duckDuckGoQuery, shouldUseDuckDuckGo } from "@/lib/ai/duckduckgo";
@@ -80,6 +85,16 @@ describe("Busted Minds Account links", () => {
     expect(accountSignInHref("/settings")).toBe(
       "/auth/sign-in?next=%2Fsettings",
     );
+  });
+
+  it("uses Search branding only for the dedicated Search return flow", () => {
+    expect(accountProviderForSignIn(
+      "search",
+      "/auth/search-return?return=https%3A%2F%2Fsearch.bustedminds.org%2F",
+    )).toBe(BUSTED_MINDS_SEARCH_PROVIDER);
+    expect(accountProviderForSignIn("search", "/settings")).toBe(BUSTED_MINDS_AI_PROVIDER);
+    expect(accountProviderForSignIn(null, "/auth/search-return?return=ignored"))
+      .toBe(BUSTED_MINDS_AI_PROVIDER);
   });
 
   it("opens central registration and then continues back through AI sign-in", () => {

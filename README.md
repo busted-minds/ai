@@ -26,7 +26,7 @@ npm run verify
 
 Supabase migrations live in `supabase/migrations`. Project-specific management scripts live in `scripts` and use the authenticated Supabase Management API; they do not rely on the PostgreSQL pooler.
 
-Authentication is federated through the central Busted Minds Account at `accounts.bustedminds.org`. BMAI never invokes Google directly; it uses the `custom:busted-minds` OIDC provider and keeps its application data in the separate `bmai` Supabase project.
+Authentication is federated through the central Busted Minds Account at `accounts.bustedminds.org`. BMAI never invokes Google directly; it uses the `custom:busted-minds` OIDC provider and keeps its application data in the separate `bmai` Supabase project. Busted Minds Search uses the dedicated `custom:busted-minds-search` client branding while returning to the same BMAI session and user.
 
 The canonical custom username remains in the central Accounts/Chess `profiles` table. The central OIDC server exposes verified usernames as the standard `preferred_username` profile claim; BMAI stores a read-only projection in `account_profiles` and does not provide username creation or editing.
 
