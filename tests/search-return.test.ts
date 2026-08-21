@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GET, safeSearchReturn } from "@/app/auth/search-return/route";
+import { GET } from "@/app/auth/search-return/route";
+import { safeSearchReturn } from "@/lib/auth/search-return";
 
 describe("Busted Minds Search account return", () => {
   it("returns an authenticated browser to its Search page", () => {

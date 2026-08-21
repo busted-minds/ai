@@ -62,6 +62,8 @@ describe("native Busted Minds search API", () => {
       remainingGuestMessages: 9,
       authenticated: false,
       username: null,
+      displayName: null,
+      email: null,
     });
   });
 
@@ -86,6 +88,8 @@ describe("native Busted Minds search API", () => {
       data: {
         user: {
           is_anonymous: false,
+          email: "searcher@example.com",
+          user_metadata: { full_name: "Search Mind" },
           identities: [{
             provider: "custom:busted-minds",
             identity_data: {
@@ -104,6 +108,8 @@ describe("native Busted Minds search API", () => {
     await expect(response.json()).resolves.toEqual({
       authenticated: true,
       username: "searcher_64",
+      displayName: "Search Mind",
+      email: "searcher@example.com",
       remainingGuestMessages: null,
     });
     expect(mocks.generateAnswer).not.toHaveBeenCalled();

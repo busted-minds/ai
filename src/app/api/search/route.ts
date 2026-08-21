@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import type { User } from "@supabase/supabase-js";
 import {
   flushInferenceTelemetry,
   generateAnswer,
@@ -54,6 +55,20 @@ function requestIsAllowed(request: Request): boolean {
   return allowedOrigin(request) !== null;
 }
 
+function searchAccount(user: User | null) {
+  if (!user) return { username: null, displayName: null, email: null };
+  const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
+  const displayName = [metadata.full_name, metadata.name, metadata.display_name].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  )?.trim() ?? null;
+
+  return {
+    username: preferredUsernameFromUser(user),
+    displayName,
+    email: user.email ?? null,
+  };
+}
+
 function extractSources(answer: string): SearchSource[] {
   const sources: SearchSource[] = [];
   const seen = new Set<string>();
@@ -92,7 +107,7 @@ export async function GET(request: Request) {
 
   return json(request, {
     authenticated: Boolean(user),
-    username: user ? preferredUsernameFromUser(user) : null,
+    ...searchAccount(user),
     remainingGuestMessages: user ? null : remainingGuestMessages(used),
   });
 }
@@ -150,7 +165,7 @@ export async function POST(request: Request) {
       sources: extractSources(answer),
       remainingGuestMessages: user ? null : remainingGuestMessages(nextUsed),
       authenticated: Boolean(user),
-      username: user ? preferredUsernameFromUser(user) : null,
+      ...searchAccount(user),
     });
     if (!user) {
       response.cookies.set(GUEST_USAGE_COOKIE, encodeGuestUsage(nextUsed), {
