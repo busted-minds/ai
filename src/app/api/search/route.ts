@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/guest-usage";
 import { normalizeCustomInstructions } from "@/lib/chat-preferences";
 import { preferredUsernameFromUser } from "@/lib/auth/shared-identity";
+import { SEARCH_SYSTEM_PROMPT } from "@/lib/integrations/search";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -157,6 +158,7 @@ export async function POST(request: Request) {
       forceSearch: true,
       mode: "auto",
       customInstructions,
+      systemPrompt: SEARCH_SYSTEM_PROMPT,
     });
     void flushInferenceTelemetry();
     const nextUsed = user ? used : used + 1;

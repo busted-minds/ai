@@ -27,6 +27,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 import { GET, OPTIONS, POST } from "@/app/api/search/route";
+import { SEARCH_SYSTEM_PROMPT } from "@/lib/integrations/search";
 
 describe("native Busted Minds search API", () => {
   beforeEach(() => {
@@ -54,7 +55,11 @@ describe("native Busted Minds search API", () => {
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://search.bustedminds.org");
     expect(mocks.generateAnswer).toHaveBeenCalledWith(
       [{ role: "user", content: "What changed today?" }],
-      expect.objectContaining({ forceSearch: true, mode: "auto" }),
+      expect.objectContaining({
+        forceSearch: true,
+        mode: "auto",
+        systemPrompt: SEARCH_SYSTEM_PROMPT,
+      }),
     );
     expect(payload).toMatchObject({
       answer: expect.stringContaining("grounded answer"),
@@ -65,6 +70,13 @@ describe("native Busted Minds search API", () => {
       displayName: null,
       email: null,
     });
+  });
+
+  it("identifies the Search results and Search Chat experiences", () => {
+    expect(SEARCH_SYSTEM_PROMPT).toContain("operating inside Busted Minds Search");
+    expect(SEARCH_SYSTEM_PROMPT).toContain("continuing Search Chat");
+    expect(SEARCH_SYSTEM_PROMPT).toContain('"Original search:"');
+    expect(SEARCH_SYSTEM_PROMPT).toContain('"Previous answer context:"');
   });
 
   it("handles preflight and rejects unrelated browser origins", async () => {
